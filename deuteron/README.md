@@ -3,7 +3,7 @@
 A **mini-[Helion](https://github.com/pytorch/helion)**: write PyTorch-like
 tile code, get autotuned GPU kernels. Helion compiles a tile DSL down to
 Triton and autotunes the result; deuteron does exactly that one level down -
-it compiles to [newt](../newt) (the mini-Triton) and autotunes block sizes
+it compiles to [newt](../README.md) (the mini-Triton) and autotunes block sizes
 and warp counts automatically.
 
 > *Why "deuteron"? A helion is a helium-3 nucleus; a deuteron is the lighter
@@ -81,8 +81,10 @@ deuteron/runtime.py    tracing, eager oracle, autotuner, config cache
 
 ## Install
 
+Ships with newt in the same distribution, from the repo root:
+
 ```
-pip install -e ../newt && pip install -e .
-python -m pytest tests -q
-python examples/01_matmul.py     # prints the generated newt kernel
+pip install -e ..                        # installs newt + deuteron
+python -m pytest ../tests -q
+python ../examples/deuteron/01_matmul.py   # prints the generated newt kernel
 ```

@@ -66,7 +66,7 @@ Triton's *block semantics* onto CUDA's *thread semantics*:
 - the accumulator lives in WMMA **fragments across loop iterations**, and
   converts to/from the register layout (band-by-band through smem) when the
   kernel does elementwise math on it - which is what makes a fused
-  flash-attention forward possible (`newt/examples/05_fused_attention.py`).
+  flash-attention forward possible (`examples/05_fused_attention.py`).
 
 The API mirrors `triton.language` closely enough that porting a kernel is
 usually `tl` → `nl`. Autotune/heuristics decorators, constexpr
@@ -103,7 +103,7 @@ def matmul(x, y, out):
 
 ## What "equivalent performance" looks like (RTX PRO 5000 Blackwell laptop)
 
-Measured with `newt/benchmarks/bench.py` - identical kernel source for newt
+Measured with `benchmarks/bench.py` - identical kernel source for newt
 and triton-windows, same config sweep for both, idle GPU:
 
 - **vector add / fused softmax / layernorm**: newt ≈ triton (softmax and
@@ -117,13 +117,17 @@ and triton-windows, same config sweep for both, idle GPU:
   README).
 - **matmul tf32**: same ratio, and newt degrades more gracefully at 8192³.
 
-See `newt/benchmarks/results.md` for the current numbers.
+See `benchmarks/results.md` for the current numbers.
 
 ## Repository map
 
 ```
-newt/       mini-Triton   (compiler: newt/newt/compiler/codegen.py)
-deuteron/   mini-Helion   (codegen to newt: deuteron/deuteron/codegen.py)
+newt/       mini-Triton package   (compiler: newt/compiler/codegen.py)
+deuteron/   mini-Helion package   (codegen to newt: deuteron/codegen.py)
+tests/      both frameworks, one pytest suite
+examples/   newt examples + examples/deuteron/
+benchmarks/ newt vs triton-windows vs torch
+test.ipynb  NumPy-verified matmul walkthrough
 PLAN.md     architecture decisions and milestones
 LOG.md      chronological build log (what broke, what was learned)
 ```

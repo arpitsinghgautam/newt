@@ -194,8 +194,11 @@ newt/compiler/codegen.py   AST -> CUDA C++ (the compiler)
 newt/runtime/cuda.py       ctypes NVRTC + CUDA driver bindings
 newt/runtime/jit.py        @newt.jit, specialization, launch
 newt/runtime/autotuner.py  @newt.autotune / @newt.heuristics
-tests/ examples/ benchmarks/
-deuteron/                  the mini-Helion (own README, tests, examples)
+deuteron/                  the mini-Helion package (own README inside)
+tests/                     both frameworks, one pytest suite
+examples/                  newt examples + examples/deuteron/
+benchmarks/                newt vs triton-windows vs torch
+test.ipynb                 NumPy-verified matmul walkthrough
 ```
 
 ## Known limitations (by design, it's a mini)
@@ -211,10 +214,9 @@ deuteron/                  the mini-Helion (own README, tests, examples)
 ## Install
 
 ```
-pip install -e .             # newt   (needs torch + NVIDIA GPU + CUDA toolkit)
-pip install -e deuteron      # deuteron (depends on newt)
-python -m pytest tests -q
-python -m pytest deuteron/tests -q
+pip install -e .             # installs newt + deuteron
+                             # (needs torch + NVIDIA GPU + CUDA toolkit)
+python -m pytest tests -q    # 165 tests, both frameworks
 ```
 
 Works on Windows (developed on one; NVRTC DLL discovery included) and Linux.
