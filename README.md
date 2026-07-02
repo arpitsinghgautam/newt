@@ -6,8 +6,30 @@ real GPU machine code - reimplemented from scratch in ~3,000 lines of
 readable Python, in the spirit of
 [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm).
 
+The repo also contains **[deuteron](deuteron/)** ⚛, a mini-
+[Helion](https://github.com/pytorch/helion) built on top of newt: a
+PyTorch-like tile DSL that generates newt kernels and autotunes them
+automatically. Together they replicate the modern two-layer kernel-DSL
+stack in miniature:
+
+```mermaid
+flowchart LR
+    subgraph mini["this repo"]
+        D["deuteron<br/>tile DSL + autotuner"] --> N["newt<br/>block DSL + JIT compiler"]
+        N --> CU["CUDA C++ -> NVRTC -> cubin<br/>(ctypes, in-process)"]
+    end
+    subgraph prod["production stack it mirrors"]
+        H["Helion"] --> T["Triton"]
+        T --> M["MLIR -> LLVM -> PTX"]
+    end
+    mini -.->|same ideas, 100x smaller| prod
+```
+
 > *Why "newt"? **Triton** was the original genus name for newts
-> (Laurenti, 1768). A newt is literally a small triton.*
+> (Laurenti, 1768). A newt is literally a small triton. A deuteron is a
+> lighter nucleus than a helion.*
+
+## Quick taste
 
 ```python
 import torch
@@ -29,47 +51,121 @@ add_kernel[lambda meta: (newt.cdiv(1_000_000, meta["BLOCK"]),)](
     x, y, out, 1_000_000, BLOCK=1024)
 ```
 
-If you know Triton, you know newt: replace `tl` with `nl` and it usually just
-runs - same `@jit`/grid launch protocol, same `constexpr` specialization,
-same `@autotune`/`@heuristics` decorators, same masked load/store semantics,
+If you know Triton, you know newt: replace `tl` with `nl` and it usually
+just runs. Same `@jit`/grid launch protocol, `constexpr` specialization,
+`@autotune`/`@heuristics` decorators, masked load/store semantics,
 tensor-core `nl.dot`, and the same "one program = one tile" mental model.
 
-## How it works
+And the same computation, one level up, in deuteron:
 
-Triton is a full MLIR/LLVM compiler. newt takes the shortest path that
-preserves the programming model *and* the performance characteristics:
+```python
+import deuteron as dt
 
+@dt.kernel
+def matmul(x, y, out):
+    for tile_m, tile_n in dt.tile([x.shape[0], y.shape[1]]):   # launch grid
+        acc = dt.zeros([tile_m, tile_n], dtype=dt.float32)
+        for tile_k in dt.tile(x.shape[1]):                     # k-loop
+            acc += x[tile_m, tile_k] @ y[tile_k, tile_n]       # tensor cores
+        out[tile_m, tile_n] = acc
+
+matmul(x, y, out)   # traces, generates a newt kernel, autotunes, caches
 ```
-Python AST ──> typed block values (shape/dtype/layout)
-           ──> CUDA C++ source           (compiler/codegen.py)
-           ──> NVRTC, in-process JIT     (runtime/cuda.py, ctypes)
-           ──> cubin ──> cuLaunchKernel  (no cuda-python, no nvcc subprocess)
+
+## What happens when you call a newt kernel
+
+```mermaid
+flowchart TD
+    A["kernel[grid](args, BLOCK=..., num_warps=...)"] --> B["classify arguments<br/>tensors -> typed pointers<br/>ints/floats -> scalar params<br/>constexpr annotations -> compile-time values"]
+    B --> C{"specialization cache hit?<br/>key = constexpr values + arg dtypes + num_warps"}
+    C -- "hit" --> H["marshal ctypes arguments"]
+    C -- "miss" --> D["walk the Python AST<br/>every value gets shape + dtype + layout<br/>(uniform scalar / register block / WMMA fragments)"]
+    D --> E["emit CUDA C++<br/>group-cyclic register layout<br/>vectorized 16B load/store fast paths<br/>warp-shuffle reductions, smem broadcasting arena<br/>WMMA dot with chunked cp.async staging"]
+    E --> F["NVRTC compiles to a cubin<br/>(in-process, disk-cached in ~/.newt/cache)"]
+    F --> G["cuModuleLoadData + cuModuleGetFunction<br/>(CUDA driver API via ctypes)"]
+    G --> H
+    H --> I["cuLaunchKernel on torch's current stream<br/>grid blocks x (num_warps * 32) threads"]
 ```
 
-The interesting part is mapping Triton's *block* semantics onto CUDA's
+The compiler's whole job is mapping Triton's *block* semantics onto CUDA's
 *thread* semantics:
 
 | Triton concept | newt implementation |
 |---|---|
 | program instance | one thread block, `num_warps × 32` threads |
-| block tensor | registers, **group-cyclic layout**: element *i* → thread `(i/VEC) % T`, so warps read coalesced *and* each thread owns 16-byte groups |
-| `load`/`store` | runtime-checked vector fast path (`ld.global` 128-bit) with predicated scalar fallback - no static contiguity analysis needed |
-| reductions | register partials → `__shfl_xor_sync` butterfly → smem across warps |
-| broadcasting | numel-preserving = free; real broadcasts staged through a shared-memory arena |
-| `nl.dot` | smem staging + **WMMA tensor cores** (fp16/bf16 → hmma, fp32 → tf32 like Triton's default); accumulator lives in fragments across k-loops, converted to/from register layout on demand (band-by-band to keep the smem footprint tiny) |
+| block tensor | registers, **group-cyclic layout**: element *i* lives in thread `(i/VEC) % T`, so warp accesses coalesce and each thread owns 16-byte groups |
+| `load`/`store` | runtime-checked vector fast path (128-bit `ld.global`) with predicated scalar fallback; no static contiguity analysis needed |
+| reductions | register partials -> `__shfl_xor_sync` butterfly -> smem across warps |
+| broadcasting | numel-preserving reshapes are free; real broadcasts stage through a shared-memory arena |
+| `nl.dot` | smem staging + **WMMA tensor cores** (fp16/bf16 -> hmma, fp32 -> tf32); operands coming straight from `nl.load` stream global->shared with **`cp.async` in K-chunks**, overlapping the copy of chunk k+1 with the math of chunk k |
 | `constexpr` | compile-time folding + dead-branch pruning |
 | JIT cache | specialization on (constexprs, arg dtypes, num_warps), in-memory + on-disk cubin cache |
 
-Everything lives in five files you can read in an afternoon:
+## What happens when you call a deuteron kernel
 
+```mermaid
+flowchart TD
+    A["matmul(x, y, out)"] --> B["trace the kernel AST<br/>dt.tile loops -> grid dims / k-loops<br/>tile indexing -> pointer math + boundary masks<br/>@ -> nl.dot with fused accumulator"]
+    B --> C["generate newt kernel source<br/>(every tile size is a constexpr)<br/>exec -> @newt.jit function"]
+    C --> D{"config cache hit?<br/>key = source hash + shape bucket + dtypes"}
+    D -- "hit" --> K["launch best config through newt"]
+    D -- "miss" --> E["eager oracle<br/>run the SAME function as plain PyTorch<br/>on cloned inputs -> ground truth"]
+    E --> F["sample candidate configs<br/>block sizes x num_warps"]
+    F --> G["run each candidate on clones"]
+    G --> H{"output matches the oracle?"}
+    H -- "no" --> R["reject config"] --> F
+    H -- "yes" --> I["time with CUDA events"]
+    I --> J["pattern search around the best<br/>halve/double each block, step num_warps"]
+    J --> P["persist winner<br/>~/.deuteron/configs.json"]
+    P --> K
 ```
-newt/language.py           the nl.* DSL surface (mirrors triton.language)
-newt/compiler/types.py     dtypes, pointers, promotion, broadcasting
-newt/compiler/codegen.py   AST -> CUDA C++ (the compiler)
-newt/runtime/cuda.py       ctypes NVRTC + CUDA driver bindings
-newt/runtime/jit.py        @newt.jit, specialization, launch
-newt/runtime/autotuner.py  @newt.autotune / @newt.heuristics
-```
+
+The oracle step is the Helion trick that makes autotuning safe: a config
+that compiles and runs but computes the wrong thing is rejected before it
+is ever timed. `matmul.ref(x, y, out)` runs the oracle directly, and
+`matmul.to_newt_source(x, y, out)` prints the generated kernel (it looks
+exactly like the hand-written Triton tutorial matmul).
+
+## Performance
+
+Measured on an RTX PRO 5000 Blackwell Laptop GPU (sm_120), idle, identical
+kernel source and config sweep for newt and triton-windows (full tables:
+[benchmarks/results.md](benchmarks/results.md); rerun with
+`python benchmarks/bench.py`):
+
+| kernel | torch | **newt** | triton |
+|---|---|---|---|
+| vector add 64M (GB/s) | 784 | **780** | 774 |
+| fused softmax 4096×8192 (GB/s) | 634 | **634** | 635 |
+| layernorm 4096×8192 (GB/s) | 622 | **767** | 635 |
+| matmul fp16 4096³ (TFLOP/s) | 101.9 | **66.2** | 107.5 |
+| matmul tf32 8192³ (TFLOP/s) | 59.1 | **14.6** | 10.9 |
+
+**Why the memory-bound kernels hit parity.** Add, softmax and layernorm are
+DRAM-bandwidth-bound: the winner is whoever issues wide, coalesced memory
+transactions and keeps enough threads in flight, and nothing else matters.
+newt gets there by construction: the group-cyclic layout makes every warp
+access coalesced, the runtime-checked fast path turns loads into the same
+128-bit vector instructions Triton emits, fusion keeps each row in
+registers for one read and one write, and NVRTC schedules the resulting
+straight-line C++ as well as Triton's LLVM pipeline schedules its IR. Once
+both compilers saturate the memory bus there is no headroom left to differ,
+which is also why newt occasionally wins (a slightly better num_warps pick
+at a given size).
+
+**Why matmul is at ~50-70%.** Matmul is compute-bound: the winner is
+whoever keeps the tensor cores fed *every* cycle. Triton does three things
+newt does not: (1) cross-iteration software pipelining (`num_stages`):
+loads for k-step n+2 are in flight while step n computes, so tensor cores
+never wait on DRAM; newt's `cp.async` chunks only overlap *within* one
+k-iteration, and each iteration still starts on a cold chunk behind a
+`__syncthreads()`. (2) `mma.sync` PTX with *swizzled* shared-memory
+layouts: fragments load conflict-free; newt uses the coarser WMMA API,
+which hides the fragment layout and forces padded (not swizzled) tiles plus
+extra shared-memory round trips for layout changes. (3) finer scheduling
+freedom (register double-buffering of fragments, warp specialization on
+newer GPUs). Those three are exactly Triton's compiler moat; replicating
+them is the known next step, not an unknown.
 
 ## What's supported
 
@@ -84,43 +180,30 @@ broadcasting, `where` `maximum` `minimum` `fma`, `exp` `log` `exp2` `log2`
 fp32 / fp16 / bf16 / fp64 / int8-64 / uint / bool, grids up to 3D,
 `num_warps` 1-32, `@autotune` / `@heuristics`.
 
-See `examples/` (vector add → fused softmax → layernorm → autotuned matmul →
-**fused flash attention**) and 160+ tests in `tests/`.
+See [examples/](examples/) (vector add -> fused softmax -> layernorm ->
+autotuned matmul -> **fused flash attention**), 160+ tests in
+[tests/](tests/), and [test.ipynb](test.ipynb) for a NumPy-verified
+walkthrough of both frameworks.
 
-## Performance
-
-Memory-bound kernels match Triton (same coalesced, vectorized accesses);
-matmul reaches a solid fraction of Triton on tensor cores - Triton's
-remaining edge is its multi-stage `cp.async` software pipelining
-(`num_stages`), which newt accepts-but-ignores. Run it yourself:
+## Layout
 
 ```
-python benchmarks/bench.py            # newt vs triton-windows vs torch
+newt/language.py           the nl.* DSL surface (mirrors triton.language)
+newt/compiler/types.py     dtypes, pointers, promotion, broadcasting
+newt/compiler/codegen.py   AST -> CUDA C++ (the compiler)
+newt/runtime/cuda.py       ctypes NVRTC + CUDA driver bindings
+newt/runtime/jit.py        @newt.jit, specialization, launch
+newt/runtime/autotuner.py  @newt.autotune / @newt.heuristics
+tests/ examples/ benchmarks/
+deuteron/                  the mini-Helion (own README, tests, examples)
 ```
-
-Measured on an RTX PRO 5000 Blackwell Laptop GPU (sm_120), idle, identical
-kernel source and config sweep for newt and triton-windows
-(full tables: `benchmarks/results.md`):
-
-| kernel | torch | **newt** | triton |
-|---|---|---|---|
-| vector add 64M (GB/s) | 784 | **780** | 774 |
-| fused softmax 4096×8192 (GB/s) | 634 | **634** | 635 |
-| layernorm 4096×8192 (GB/s) | 622 | **767** | 635 |
-| matmul fp16 4096³ (TFLOP/s) | 101.9 | **66.2** | 107.5 |
-| matmul tf32 8192³ (TFLOP/s) | 59.1 | **14.6** | 10.9 |
-
-Memory-bound kernels sit at parity with Triton. Tensor-core matmul reaches
-~50-70 % of Triton - the chunked `cp.async` pipeline hides most intra-tile
-load latency, but Triton's cross-iteration multi-stage pipelining and
-`mma.sync`+swizzled-smem codegen keep an edge that a mini can acknowledge
-rather than chase.
 
 ## Known limitations (by design, it's a mini)
 
 - Block dims must be powers of two (like `tl.arange`).
-- `num_stages` pipelining is a no-op; `tl.rand`/philox, `device_print`,
-  calling other `@jit` functions, and multi-dim `reshape` tricks are omitted.
+- Cross-iteration `num_stages` pipelining is a no-op (accepted, ignored);
+  `tl.rand`/philox, `device_print`, and calling other `@jit` functions are
+  omitted.
 - `/` `%` `//` on integer blocks follow C truncation semantics.
 - Pointer offsets are int32 (tensors < 2³¹ elements).
 - fp32 `dot` always uses tf32 tensor cores (Triton's default too).
@@ -128,8 +211,13 @@ rather than chase.
 ## Install
 
 ```
-pip install -e .           # needs torch + an NVIDIA GPU + CUDA toolkit (NVRTC)
+pip install -e .             # newt   (needs torch + NVIDIA GPU + CUDA toolkit)
+pip install -e deuteron      # deuteron (depends on newt)
 python -m pytest tests -q
+python -m pytest deuteron/tests -q
 ```
 
-Works on Windows (developed on one - NVRTC DLL discovery included) and Linux.
+Works on Windows (developed on one; NVRTC DLL discovery included) and Linux.
+See [OVERVIEW.md](OVERVIEW.md) for the problem statement and approach,
+[PLAN.md](PLAN.md) for architecture decisions, and [LOG.md](LOG.md) for the
+build log.
