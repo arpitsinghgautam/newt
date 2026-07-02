@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "newt-lang"
 version = "0.1.0"
-description = "A mini-Triton: block-programming DSL JIT-compiled to CUDA via NVRTC"
+description = "A mini-Triton (newt) and a mini-Helion (deuteron): tile DSLs JIT-compiled to CUDA via NVRTC"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["torch"]
 
 [tool.setuptools.packages.find]
-include = ["newt*"]
+include = ["newt*", "deuteron*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
