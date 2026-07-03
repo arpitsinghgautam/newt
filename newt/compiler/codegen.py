@@ -925,6 +925,10 @@ class Codegen(ast.NodeVisitor):
         elif store.layout == FRAG:
             if val.var in getattr(self, "frag_pending", {}):
                 self._emit_flush(val.var)
+            if store.var in getattr(self, "frag_pending", {}):
+                # a deferred mma into the value being overwritten must retire
+                # first, or it would later fire into the NEW contents
+                self._emit_flush(store.var)
             m = store.meta
             self.emit("#pragma unroll")
             self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)")
@@ -1631,6 +1635,7 @@ class Codegen(ast.NodeVisitor):
         if mask is not None and mask.layout in (LAZY_LOAD, LAZY_ZERO):
             mask = self.materialize(mask)
         self.flush_lazy_loads()  # deferred loads must read pre-store memory
+        self._drain_pipelines()  # in-flight cp.async sources must stay immutable
         if ptr.layout == UNIFORM:
             if mask is not None and mask.layout == CYCLIC:
                 self.err(node, "a scalar pointer cannot take a block mask")
@@ -1696,6 +1701,7 @@ class Codegen(ast.NodeVisitor):
         elem = ptr.dtype.element
         value = self.materialize(value, CYCLIC)
         self.flush_lazy_loads()
+        self._drain_pipelines()
         operands = [ptr] + ([value] if value.layout == CYCLIC else []) + (
             [mask] if mask is not None and mask.layout == CYCLIC else [])
         operands, shape = self.broadcast_values(node, operands)
@@ -2195,6 +2201,15 @@ class Codegen(ast.NodeVisitor):
             b = self.materialize(b, CYCLIC)
         pipelined = (use_async and acc_streamable
                      and os.environ.get("NEWT_PIPELINE_DOT", "1") != "0")
+        if pipelined:
+            # the ring must fit next to the scratch arena (estimate the
+            # epilogue's banded conversion buffer); otherwise fall back to
+            # the chunked path rather than failing at assemble time
+            est_scratch = max(self.smem_bytes, 16 * (N + 8) * 4)
+            est_scratch = (est_scratch + 15) // 16 * 16
+            rings = sum(self.ring_reservations) + 2 * (bytesA + bytesB)
+            if est_scratch + rings > MAX_SMEM:
+                pipelined = False
 
         if pipelined:
             # cross-iteration double buffering with deferred consumption:
@@ -2233,9 +2248,9 @@ class Codegen(ast.NodeVisitor):
             self.emit(f"{buf} ^= 1; {pend} = true;")
             self.indent -= 1
             self.emit("}")
-            self.frag_pending[acc.var] = dict(
+            self.frag_pending.setdefault(acc.var, []).append(dict(
                 site=site, m=m, lda=lda, ldb=ldb, ft=ft, KF=KF, K=K,
-                ces=ces, slotsz=slotsz, bytesA=bytesA)
+                ces=ces, slotsz=slotsz, bytesA=bytesA))
             return acc
 
         self.track_smem(bytesA + bytesB)
@@ -2279,24 +2294,32 @@ class Codegen(ast.NodeVisitor):
         return acc
 
     def _emit_flush(self, accvar):
-        """Run the deferred mma of a pipelined dot (runtime no-op if none
-        pending). Emitted at every downstream read of the accumulator; the
-        runtime flag makes repeated flush sites idempotent."""
-        p = self.frag_pending[accvar]
-        site, ces, slotsz = p["site"], p["ces"], p["slotsz"]
-        buf, pend = f"_dpb{site}", f"_dpp{site}"
-        self.emit(f"if ({pend}) {{")
-        self.indent += 1
-        self.emit("__pipeline_wait_prior(0);")
-        self.emit("__syncthreads();")
-        self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
-        self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
-                  f"+ {p['bytesA']});")
-        self._emit_mma(p["m"], accvar, "_Ar", "_Br", p["lda"], p["ldb"],
-                       p["ft"], p["KF"], 0, p["K"] // p["KF"])
-        self.emit(f"{pend} = false;")
-        self.indent -= 1
-        self.emit("}")
+        """Run the deferred mma(s) of pipelined dot sites for this
+        accumulator (runtime no-op if none pending). Emitted at every
+        downstream read; at most one site's flag is true at runtime and the
+        flags make repeated flush blocks idempotent."""
+        for p in self.frag_pending[accvar]:
+            site, ces, slotsz = p["site"], p["ces"], p["slotsz"]
+            buf, pend = f"_dpb{site}", f"_dpp{site}"
+            self.emit(f"if ({pend}) {{")
+            self.indent += 1
+            self.emit("__pipeline_wait_prior(0);")
+            self.emit("__syncthreads();")
+            self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
+            self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
+                      f"+ {p['bytesA']});")
+            self._emit_mma(p["m"], accvar, "_Ar", "_Br", p["lda"], p["ldb"],
+                           p["ft"], p["KF"], 0, p["K"] // p["KF"])
+            self.emit(f"{pend} = false;")
+            self.indent -= 1
+            self.emit("}")
+
+    def _drain_pipelines(self):
+        """Retire every pending deferred mma. Called before stores/atomics:
+        a store could overwrite memory a staged cp.async is still reading
+        (the async-copy source must stay immutable until the copy lands)."""
+        for accvar in list(self.frag_pending):
+            self._emit_flush(accvar)
 
     def _emit_mma(self, m, accv, As, Bs, lda, ldb, ft, KF, kk0, kk1):
         """Warp-level mma over fragment steps [kk0, kk1). Preloads the
