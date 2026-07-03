@@ -174,10 +174,12 @@ class JITFunction:
             raise ValueError(f"num_stages must be in 1..8, got {num_stages}")
         constexprs, runtime = self._classify(args, kwargs)
         runtime_types = {n: self._type_of(n, v) for n, v in runtime.items()}
+        env_knobs = tuple(os.environ.get(k, "") for k in (
+            "NEWT_MMA", "NEWT_VEC", "NEWT_ASYNC_DOT", "NEWT_PIPELINE_DOT"))
         key = (
             tuple(sorted((k, repr(v)) for k, v in constexprs.items())),
             tuple((n, t.name) for n, t in runtime_types.items()),
-            num_warps, num_stages,
+            num_warps, num_stages, env_knobs,
         )
         compiled = self.cache.get(key)
         if compiled is None:

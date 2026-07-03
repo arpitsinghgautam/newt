@@ -2257,8 +2257,10 @@ class Codegen(ast.NodeVisitor):
         esz = elem.itemsize
         if m["kind"] == "mma":
             lda, ldb = K, N
-            swzA = min(K // 8, 8) - 1
-            swzB = min(N // 8, 8) - 1
+            # derive swizzle masks from the leading dimensions so staging and
+            # ldmatrix (which recomputes from lda/ldb) can never disagree
+            swzA = min(lda // 8, 8) - 1
+            swzB = min(ldb // 8, 8) - 1
         else:
             PA = 8 if esz <= 2 else 4
             PB = 8 if esz <= 2 else 4
@@ -2279,10 +2281,12 @@ class Codegen(ast.NodeVisitor):
                      and os.environ.get("NEWT_PIPELINE_DOT", "1") != "0")
         if pipelined:
             # the ring must fit next to the scratch arena (estimate the
-            # epilogue's banded conversion buffer); otherwise shrink the ring
-            # and finally fall back to the chunked path rather than failing
-            # at assemble time
-            est_scratch = max(self.smem_bytes, 16 * (N + 8) * 4)
+            # epilogue's conversion buffer with the same banded/full predicate
+            # frag_to_cyclic uses); otherwise shrink the ring and finally fall
+            # back to the chunked path rather than failing at assemble time
+            banded = (16 * N) % (self.T * self.VEC) == 0 and M > 16
+            epi_rows = 16 if banded else M
+            est_scratch = max(self.smem_bytes, epi_rows * (N + 8) * 4)
             est_scratch = (est_scratch + 15) // 16 * 16
             slotsz = bytesA + bytesB
             while S > 2 and est_scratch + sum(self.ring_reservations) + S * slotsz > MAX_SMEM:
