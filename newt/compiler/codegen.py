@@ -218,6 +218,12 @@ class Codegen(ast.NodeVisitor):
         env = os.environ.get("NEWT_VEC")
         if env:
             self.VEC = int(env)
+        # cross-iteration dot pipeline state:
+        # ring_reservations: dedicated smem regions beyond the scratch arena
+        # frag_pending: acc var -> parameters of a deferred (not yet run) mma
+        self.ring_reservations = []
+        self.frag_pending = {}
+        self._prologue_decls = []
 
     # -- infrastructure ------------------------------------------------------
 
@@ -517,6 +523,9 @@ class Codegen(ast.NodeVisitor):
         return v.var
 
     def _frag_elementwise(self, node, operands, rdtype, expr_fn):
+        for o in operands:
+            if o.layout == FRAG and o.var in getattr(self, "frag_pending", {}):
+                self._emit_flush(o.var)
         ref = next(o for o in operands if o.layout == FRAG)
         m = ref.meta
         out = self.fresh("fe")
@@ -590,6 +599,8 @@ class Codegen(ast.NodeVisitor):
         16*(N+pad) floats instead of M*(N+pad) - the full buffer would
         dominate the kernel's smem footprint and wreck occupancy.
         """
+        if v.var in getattr(self, "frag_pending", {}):
+            self._emit_flush(v.var)
         m = v.meta
         M, N = m["M"], m["N"]
         PC = 8
@@ -721,6 +732,7 @@ class Codegen(ast.NodeVisitor):
         self.emit("const int _lane = _tid & 31;")
         self.emit("const int _warp = _tid >> 5;")
         self.emit("(void)_lane; (void)_warp;")
+        self._prologue_idx = len(self.lines)
         for stmt in self.fndef.body:
             self.visit(stmt)
         return self.assemble()
@@ -842,6 +854,8 @@ class Codegen(ast.NodeVisitor):
             self.emit(f"for (int _c = 0; _c < {S}; ++_c) {t}[_c] = {val.var}[_c];")
             return Value(CYCLIC, val.dtype, val.shape, t, base=val.base)
         if val.layout == FRAG:
+            if val.var in getattr(self, "frag_pending", {}):
+                self._emit_flush(val.var)
             t = self.fresh("fcp")
             m = val.meta
             self.emit(self._frag_decl(t, m))
@@ -909,6 +923,8 @@ class Codegen(ast.NodeVisitor):
                 self.emit(f"{store.var}[_s] = {val.var}[_s];")
                 self.end_loop()
         elif store.layout == FRAG:
+            if val.var in getattr(self, "frag_pending", {}):
+                self._emit_flush(val.var)
             m = store.meta
             self.emit("#pragma unroll")
             self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)")
@@ -2127,6 +2143,12 @@ class Codegen(ast.NodeVisitor):
                            f"(got {M}x{K} @ {K}x{N})")
         self.uses.add("mma")
         m = self._frag_meta(M, N, KF)
+        # a persistent (loop-carried) fragment accumulator can be pipelined:
+        # each execution stages its tile async and runs the mma for the tile
+        # staged by the PREVIOUS execution, hiding a full iteration of memory
+        # latency. A CYCLIC acc (rescaled between dots, e.g. attention) can't:
+        # its value is consumed every iteration.
+        acc_streamable = acc is not None and acc.layout in (LAZY_ZERO, FRAG)
         # accumulator fragments
         if acc is None:
             accv = self.fresh("acc")
@@ -2151,29 +2173,77 @@ class Codegen(ast.NodeVisitor):
                 acc = self.cyclic_to_frag(acc, m)
             elif acc.meta != m:
                 self.err(node, "dot accumulator tiling mismatch")
-        # stage operands in shared memory
+        # a deferred mma from another dot site must land before we touch acc
+        if acc.var in self.frag_pending:
+            self._emit_flush(acc.var)
+        # staging geometry
         elem = a.dtype
         ces = elem.ctype
         esz = elem.itemsize
         PA = 8 if esz <= 2 else 4
         PB = 8 if esz <= 2 else 4
         lda, ldb = K + PA, N + PB
-        bytesA = M * lda * esz
-        bytesA = (bytesA + 15) // 16 * 16
-        bytesB = K * ldb * esz
+        bytesA = (M * lda * esz + 15) // 16 * 16
+        bytesB = (K * ldb * esz + 15) // 16 * 16
+        V = self.VEC
+        CK = max(KF, V)
+        async_ok = (V > 1 and V * esz in (4, 8, 16, 32)
+                    and K % V == 0 and N % V == 0 and K % CK == 0)
+        if use_async and not async_ok:
+            use_async = False
+            a = self.materialize(a, CYCLIC)
+            b = self.materialize(b, CYCLIC)
+        pipelined = (use_async and acc_streamable
+                     and os.environ.get("NEWT_PIPELINE_DOT", "1") != "0")
+
+        if pipelined:
+            # cross-iteration double buffering with deferred consumption:
+            #   sync; cp.async THIS tile -> ring[buf^1]; commit;
+            #   if pending: wait for the PREVIOUS tile; sync; mma(ring[buf]);
+            #   rotate. The last staged tile is consumed by a flush at the
+            #   first downstream read of the accumulator.
+            self.uses.add("pipeline")
+            a.meta["consumed"] = True
+            b.meta["consumed"] = True
+            site = len(self.ring_reservations)
+            slotsz = bytesA + bytesB
+            self.ring_reservations.append(2 * slotsz)
+            buf = f"_dpb{site}"
+            pend = f"_dpp{site}"
+            self._prologue_decls.append(f"int {buf} = 0; bool {pend} = false;")
+            self.emit("__syncthreads();")
+            self.emit("{")
+            self.indent += 1
+            self.emit(f"{ces}* _Aw = ({ces}*)(_smem + _NRB{site} + ({buf} ^ 1) * {slotsz});")
+            self.emit(f"{ces}* _Bw = ({ces}*)(_smem + _NRB{site} + ({buf} ^ 1) * {slotsz} "
+                      f"+ {bytesA});")
+            self._stage_chunk_async(a, M, K, lda, "_Aw", None, CK, by_rows=False)
+            self._stage_chunk_async(b, K, N, ldb, "_Bw", None, CK, by_rows=True)
+            self.emit("__pipeline_commit();")
+            self.emit(f"if ({pend}) {{")
+            self.indent += 1
+            self.emit("__pipeline_wait_prior(1);")
+            self.emit("__syncthreads();")
+            self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
+            self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
+                      f"+ {bytesA});")
+            self._emit_mma(m, acc.var, "_Ar", "_Br", lda, ldb, ft, KF, 0, K // KF)
+            self.indent -= 1
+            self.emit("}")
+            self.emit(f"{buf} ^= 1; {pend} = true;")
+            self.indent -= 1
+            self.emit("}")
+            self.frag_pending[acc.var] = dict(
+                site=site, m=m, lda=lda, ldb=ldb, ft=ft, KF=KF, K=K,
+                ces=ces, slotsz=slotsz, bytesA=bytesA)
+            return acc
+
         self.track_smem(bytesA + bytesB)
         As = self.fresh("As")
         Bs = self.fresh("Bs")
         self.emit("__syncthreads();")
         self.emit(f"{ces}* {As} = ({ces}*)_smem;")
         self.emit(f"{ces}* {Bs} = ({ces}*)(_smem + {bytesA});")
-        V = self.VEC
-        CK = max(KF, V)
-        if use_async and not (V > 1 and V * esz in (4, 8, 16, 32)
-                              and K % V == 0 and N % V == 0 and K % CK == 0):
-            use_async = False
-            a = self.materialize(a, CYCLIC)
-            b = self.materialize(b, CYCLIC)
         if use_async:
             # chunked cp.async pipeline: copy chunk ck+1 (global -> smem via
             # the DMA path, no registers) while tensor cores chew on chunk ck
@@ -2207,6 +2277,26 @@ class Codegen(ast.NodeVisitor):
             self.emit("__syncthreads();")
             self._emit_mma(m, acc.var, As, Bs, lda, ldb, ft, KF, 0, K // KF)
         return acc
+
+    def _emit_flush(self, accvar):
+        """Run the deferred mma of a pipelined dot (runtime no-op if none
+        pending). Emitted at every downstream read of the accumulator; the
+        runtime flag makes repeated flush sites idempotent."""
+        p = self.frag_pending[accvar]
+        site, ces, slotsz = p["site"], p["ces"], p["slotsz"]
+        buf, pend = f"_dpb{site}", f"_dpp{site}"
+        self.emit(f"if ({pend}) {{")
+        self.indent += 1
+        self.emit("__pipeline_wait_prior(0);")
+        self.emit("__syncthreads();")
+        self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
+        self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
+                  f"+ {p['bytesA']});")
+        self._emit_mma(p["m"], accvar, "_Ar", "_Br", p["lda"], p["ldb"],
+                       p["ft"], p["KF"], 0, p["K"] // p["KF"])
+        self.emit(f"{pend} = false;")
+        self.indent -= 1
+        self.emit("}")
 
     def _emit_mma(self, m, accv, As, Bs, lda, ldb, ft, KF, kk0, kk1):
         """Warp-level mma over fragment steps [kk0, kk1). Preloads the
@@ -2255,9 +2345,10 @@ class Codegen(ast.NodeVisitor):
         """cp.async one K-chunk of a deferred load into its smem tile.
 
         Chunk ck covers columns [ck*CK, (ck+1)*CK) of A (by_rows=False) or
-        rows of B (by_rows=True). Groups with contiguous, aligned, fully
-        valid lanes go through __pipeline_memcpy_async; the rest copy
-        synchronously with mask/other semantics.
+        rows of B (by_rows=True); ck=None stages the whole tile. Groups with
+        contiguous, aligned, fully valid lanes go through
+        __pipeline_memcpy_async; the rest copy synchronously with mask/other
+        semantics.
         """
         ptr, mask, other = lazy.meta["ptr"], lazy.meta["mask"], lazy.meta["other"]
         elem = lazy.dtype
@@ -2295,8 +2386,9 @@ class Codegen(ast.NodeVisitor):
             outer.append(f"_j0 < {numel}")
         self.emit(f"int _row = _j0 / {cols}, _col = _j0 % {cols};")
         sel = "_row" if by_rows else "_col"
-        outer.append(f"{sel} / {CK} == {ck}")
-        self.emit(f"if ({' && '.join(outer)}) {{")
+        if ck is not None:
+            outer.append(f"{sel} / {CK} == {ck}")
+        self.emit(f"if ({' && '.join(outer) if outer else 'true'}) {{")
         self.indent += 1
         self.emit(f"int _i0 = _g * {V};")
         self.emit(f"int _o0 = {ptr.var}[_i0];")
@@ -2376,14 +2468,30 @@ class Codegen(ast.NodeVisitor):
             hdr.insert(1, "#include <cuda_fp16.h>")
         if "bf16" in self.uses and "#include <cuda_bf16.h>" not in hdr:
             hdr.insert(1, "#include <cuda_bf16.h>")
+        # pipelined-dot state lives at function scope, before any loops
+        if self._prologue_decls:
+            self.lines[self._prologue_idx:self._prologue_idx] = [
+                "  " + d for d in self._prologue_decls]
+        # smem layout: [scratch arena][ring buffers...]; rings are dedicated
+        # so intervening smem ops can't clobber tiles that are still in flight
+        scratch = (self.smem_bytes + 15) // 16 * 16
+        base = scratch
+        for i, rbytes in enumerate(self.ring_reservations):
+            hdr.append(f"#define _NRB{i} {base}")
+            base += rbytes
+        total_smem = base
+        if total_smem > MAX_SMEM:
+            raise CompileError(
+                f"kernel needs {total_smem} bytes of shared memory (max {MAX_SMEM}); "
+                f"use smaller block sizes")
         body = []
         body.append(f'extern "C" __global__ void __launch_bounds__({self.T}) '
                     f"{self.name}({', '.join(params)}) {{")
-        if self.smem_bytes > 0:
+        if total_smem > 0:
             body.append("  extern __shared__ __align__(16) char _smem[];")
         body += self.lines
         body.append("}")
-        return "\n".join(hdr + [""] + body) + "\n", self.smem_bytes
+        return "\n".join(hdr + [""] + body) + "\n", total_smem
 
 
 def compile_fn(fndef, fn_globals, param_values, constexprs, num_warps, kernel_name):
