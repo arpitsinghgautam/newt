@@ -135,12 +135,16 @@ kernel source and config sweep for newt and triton-windows (full tables:
 
 | kernel | torch | **newt** | triton |
 |---|---|---|---|
-| vector add 64M (GB/s) | 782 | **777** | 779 |
-| fused softmax 4096×8192 (GB/s) | 694 | **750** | 763 |
-| layernorm 4096×8192 (GB/s) | 626 | **767** | 760 |
-| matmul fp16 4096³ (TFLOP/s) | 99.0 | **79.5** | 113.2 |
-| matmul fp16 8192³ (TFLOP/s) | 90.4 | **70.1** | 85.6 |
-| matmul tf32 8192³ (TFLOP/s) | 55.5 | **20.2** | 41.3 |
+| fused softmax 4096×8192 (GB/s) | 760 | **765** | 767 |
+| layernorm 4096×8192 (GB/s) | 625 | **767** | 764 |
+| matmul fp16 2048³ (TFLOP/s) | 105.7 | **83.4** | 100.1 |
+| matmul fp16 8192³ (TFLOP/s) | 107.1 | **80.1** | 103.7 |
+| matmul tf32 8192³ (TFLOP/s) | 61.5 | **22.1** | 53.2 |
+
+(Vector add sits at parity too: 475-785 GB/s depending on the thermal
+state, always within a few percent of triton in the same run. Cold-start
+single-kernel runs reach 96 TFLOP/s fp16 at 4096³; this laptop throttles
+sustained suites, so within-run comparisons are what count.)
 
 **Why the memory-bound kernels hit parity.** Add, softmax and layernorm are
 DRAM-bandwidth-bound: the winner is whoever issues wide, coalesced memory
@@ -154,20 +158,22 @@ both compilers saturate the memory bus there is no headroom left to differ,
 which is also why newt occasionally wins (a slightly better num_warps pick
 at a given size).
 
-**Why matmul fp16 is at ~70-80%.** Matmul is compute-bound: the winner is
-whoever keeps the tensor cores fed *every* cycle. newt hides memory latency
-with cross-iteration pipelining: each `nl.dot` execution streams its tile
-into a double-buffered shared-memory ring with `cp.async` and runs the mma
-for the tile staged by the *previous* loop iteration, so the copy overlaps
-a full iteration of tensor-core math (a deferred flush consumes the final
-tile at the accumulator's first downstream read). That transformation took
-newt from ~45-70% to ~70-82% of Triton. The remaining gap is Triton's
-lowest layer: `mma.sync` PTX with *swizzled* (fully conflict-free) shared
-memory instead of newt's coarser WMMA API with padded tiles, register
-double-buffering of fragments, and 3-4 stage pipelines instead of 2. tf32
-sits lower (~45%) because its small K-fragments (k=8) leave less math per
-tile to hide latency behind. All of that is the known next step, not an
-unknown.
+**Why matmul fp16 is at ~75-85%.** Matmul is compute-bound: the winner is
+whoever keeps the tensor cores fed *every* cycle. newt fights with the same
+weapons Triton uses. fp16/bf16 dots compile to raw PTX: `ldmatrix` fragment
+loads from XOR-swizzled (bank-conflict-free, unpadded) shared memory feeding
+`mma.sync.m16n8k16`, with the documented accumulator register mapping used
+for every layout conversion. Memory latency hides behind an N-slot
+`cp.async` ring (`num_stages`, default 3, a real tuning knob here just like
+in Triton): each `nl.dot` execution streams its tile in asynchronously and
+runs the mma for a tile staged iterations earlier, one block barrier per
+k-step, with a deferred flush consuming the final tiles at the
+accumulator's first downstream read. This stack took newt from ~45-70% of
+Triton (naive WMMA) to ~75-85% sustained. The last stretch is Triton's
+finest-grained scheduling: register double-buffering of fragments inside
+the k-step, per-iteration address strength-reduction, and warp
+specialization. tf32 stays on the WMMA path (~45%): its small K-fragments
+leave less math per tile to hide latency behind.
 
 ## What's supported
 
