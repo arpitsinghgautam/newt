@@ -2500,43 +2500,61 @@ class Codegen(ast.NodeVisitor):
         """mma.sync core: ldmatrix from XOR-swizzled smem into registers,
         then the FM x FN m16n8k16 outer-product nest. One _kk step covers 16
         elements of K. Per-warp tiles are 16 rows x 8 cols; lane l of a warp
-        holds accumulator elements at (row l>>2 [+8], cols 2*(l&3) [+1])."""
+        holds accumulator elements at (row l>>2 [+8], cols 2*(l&3) [+1]).
+
+        Fragments are double-buffered across k-steps: step kk+1's ldmatrix
+        issues BEFORE step kk's mma nest. asm volatile pins instruction
+        order, so without the ping-pong every step would stall on its own
+        loads; with it the load latency hides behind the tensor-core math.
+        """
         mma_fn = "_mma_f16" if ft == "__half" else "_mma_bf16"
         swa = min(lda // 8, 8) - 1
         swb = min(ldb // 8, 8) - 1
         FM, FN = m["FM"], m["FN"]
+
+        def load_frags(kk_expr, slot):
+            # A fragments: x4 ldmatrix; lanes 0-15 give rows, lane>>4 picks
+            # the k-halves (8x8 quadrants land in mma operand order)
+            self.emit("#pragma unroll")
+            self.emit(f"for (int _fm = 0; _fm < {FM}; ++_fm) {{")
+            self.indent += 1
+            self.emit(f"int _r = (_wm * {FM} + _fm) * 16 + (_lane & 15);")
+            self.emit(f"int _c8 = ({kk_expr}) * 2 + (_lane >> 4);")
+            self.emit(f"_ldm4(_nsa(&{As}[_r * {lda} + _nsw(_r, _c8, {swa}) * 8]), "
+                      f"_fa[{slot}][_fm][0], _fa[{slot}][_fm][1], "
+                      f"_fa[{slot}][_fm][2], _fa[{slot}][_fm][3]);")
+            self.end_loop()
+            # B fragments: x2 transposed ldmatrix (row-major smem -> col-major)
+            self.emit("#pragma unroll")
+            self.emit(f"for (int _fn = 0; _fn < {FN}; ++_fn) {{")
+            self.indent += 1
+            self.emit(f"int _kr = ({kk_expr}) * 16 + (_lane & 15);")
+            self.emit(f"int _c8 = _wn * {FN} + _fn;")
+            self.emit(f"_ldm2t(_nsa(&{Bs}[_kr * {ldb} + _nsw(_kr, _c8, {swb}) * 8]), "
+                      f"_fb[{slot}][_fn][0], _fb[{slot}][_fn][1]);")
+            self.end_loop()
+
         self.emit(f"if (_warp < {m['W']}) {{")
         self.indent += 1
         self.emit(f"int _wm = _warp / {m['WN']}, _wn = _warp % {m['WN']};")
+        self.emit(f"unsigned _fa[2][{FM}][4]; unsigned _fb[2][{FN}][2];")
+        load_frags(str(kk0), "0")
         self.emit("#pragma unroll")
         self.emit(f"for (int _kk = {kk0}; _kk < {kk1}; ++_kk) {{")
         self.indent += 1
-        self.emit(f"unsigned _fa[{FM}][4]; unsigned _fb[{FN}][2];")
-        # A fragments: x4 ldmatrix; lanes 0-15 give rows, lane>>4 picks the
-        # k-halves (8x8 quadrants land in mma operand order)
-        self.emit("#pragma unroll")
-        self.emit(f"for (int _fm = 0; _fm < {FM}; ++_fm) {{")
+        self.emit(f"int _cur = (_kk - {kk0}) & 1;")
+        self.emit(f"if (_kk + 1 < {kk1}) {{")
         self.indent += 1
-        self.emit(f"int _r = (_wm * {FM} + _fm) * 16 + (_lane & 15);")
-        self.emit("int _c8 = _kk * 2 + (_lane >> 4);")
-        self.emit(f"_ldm4(_nsa(&{As}[_r * {lda} + _nsw(_r, _c8, {swa}) * 8]), "
-                  f"_fa[_fm][0], _fa[_fm][1], _fa[_fm][2], _fa[_fm][3]);")
-        self.end_loop()
-        # B fragments: x2 transposed ldmatrix (row-major smem -> col-major regs)
-        self.emit("#pragma unroll")
-        self.emit(f"for (int _fn = 0; _fn < {FN}; ++_fn) {{")
-        self.indent += 1
-        self.emit("int _kr = _kk * 16 + (_lane & 15);")
-        self.emit(f"int _c8 = _wn * {FN} + _fn;")
-        self.emit(f"_ldm2t(_nsa(&{Bs}[_kr * {ldb} + _nsw(_kr, _c8, {swb}) * 8]), "
-                  f"_fb[_fn][0], _fb[_fn][1]);")
-        self.end_loop()
+        load_frags("_kk + 1", "_cur ^ 1")
+        self.indent -= 1
+        self.emit("}")
         self.emit("#pragma unroll")
         self.emit(f"for (int _fm = 0; _fm < {FM}; ++_fm)")
         self.emit("#pragma unroll")
         self.emit(f"for (int _fn = 0; _fn < {FN}; ++_fn)")
-        self.emit(f"  {mma_fn}({accv}[_fm][_fn], _fa[_fm][0], _fa[_fm][1], "
-                  f"_fa[_fm][2], _fa[_fm][3], _fb[_fn][0], _fb[_fn][1]);")
+        self.emit(f"  {mma_fn}({accv}[_fm][_fn], _fa[_cur][_fm][0], _fa[_cur][_fm][1], "
+                  f"_fa[_cur][_fm][2], _fa[_cur][_fm][3], "
+                  f"_fb[_cur][_fn][0], _fb[_cur][_fn][1]);")
         self.end_loop()
         self.end_loop()
 
