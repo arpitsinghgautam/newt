@@ -2313,24 +2313,55 @@ class Codegen(ast.NodeVisitor):
             self._prologue_decls.append(f"int {buf} = 0; int {pend} = 0;")
             self.emit("{")
             self.indent += 1
-            self.emit(f"if ({pend} == {S - 1}) {{")
-            self.indent += 1
-            self.emit(f"__pipeline_wait_prior({S - 2});")
-            self.emit("__syncthreads();")
-            self.emit(f"int _rs = ({buf} + 1) % {S};")
-            self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz});")
-            self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz} "
-                      f"+ {bytesA});")
-            self._emit_mma(m, acc.var, "_Ar", "_Br", lda, ldb, ft, KF, 0, K // KF)
-            self.indent -= 1
-            self.emit(f"}} else {{ {pend}++; if ({pend} == 1) __syncthreads(); }}")
-            self.emit(f"{ces}* _Aw = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
-            self.emit(f"{ces}* _Bw = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
-                      f"+ {bytesA});")
-            self._stage_chunk_async(a, M, K, lda, "_Aw", None, CK, by_rows=False, swz=swzA)
-            self._stage_chunk_async(b, K, N, ldb, "_Bw", None, CK, by_rows=True, swz=swzB)
-            self.emit("__pipeline_commit();")
-            self.emit(f"{buf} = ({buf} + 1) % {S};")
+            if S == 2:
+                # stage-first ordering: the copy of tile k overlaps the mma of
+                # tile k-1 (consume-first would leave S=2 with no overlap).
+                # The entry barrier guards the slot the previous mma read.
+                self.emit("__syncthreads();")
+                self.emit(f"{ces}* _Aw = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
+                self.emit(f"{ces}* _Bw = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
+                          f"+ {bytesA});")
+                self._stage_chunk_async(a, M, K, lda, "_Aw", None, CK,
+                                        by_rows=False, swz=swzA)
+                self._stage_chunk_async(b, K, N, ldb, "_Bw", None, CK,
+                                        by_rows=True, swz=swzB)
+                self.emit("__pipeline_commit();")
+                self.emit(f"if ({pend} == 1) {{")
+                self.indent += 1
+                self.emit("__pipeline_wait_prior(1);")
+                self.emit("__syncthreads();")
+                self.emit(f"int _rs = ({buf} + 1) % 2;")
+                self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz});")
+                self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz} "
+                          f"+ {bytesA});")
+                self._emit_mma(m, acc.var, "_Ar", "_Br", lda, ldb, ft, KF, 0, K // KF)
+                self.indent -= 1
+                self.emit(f"}} else {{ {pend} = 1; }}")
+                self.emit(f"{buf} ^= 1;")
+            else:
+                # consume-first ordering: with S-1 tiles in flight the oldest
+                # has had S-1 iterations to land; one barrier per iteration
+                # (the pre-mma barrier also guards the free slot's reuse)
+                self.emit(f"if ({pend} == {S - 1}) {{")
+                self.indent += 1
+                self.emit(f"__pipeline_wait_prior({S - 2});")
+                self.emit("__syncthreads();")
+                self.emit(f"int _rs = ({buf} + 1) % {S};")
+                self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz});")
+                self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz} "
+                          f"+ {bytesA});")
+                self._emit_mma(m, acc.var, "_Ar", "_Br", lda, ldb, ft, KF, 0, K // KF)
+                self.indent -= 1
+                self.emit(f"}} else {{ {pend}++; if ({pend} == 1) __syncthreads(); }}")
+                self.emit(f"{ces}* _Aw = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
+                self.emit(f"{ces}* _Bw = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
+                          f"+ {bytesA});")
+                self._stage_chunk_async(a, M, K, lda, "_Aw", None, CK,
+                                        by_rows=False, swz=swzA)
+                self._stage_chunk_async(b, K, N, ldb, "_Bw", None, CK,
+                                        by_rows=True, swz=swzB)
+                self.emit("__pipeline_commit();")
+                self.emit(f"{buf} = ({buf} + 1) % {S};")
             self.indent -= 1
             self.emit("}")
             self.frag_pending.setdefault(acc.var, []).append(dict(

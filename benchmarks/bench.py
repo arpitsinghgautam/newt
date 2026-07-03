@@ -13,6 +13,7 @@ way Triton's own benchmarks are run.
 import argparse
 import os
 import subprocess
+import time
 
 import torch
 
@@ -323,6 +324,9 @@ def main():
     ap.add_argument("--save", action="store_true")
     ap.add_argument("--kernel", default=None,
                     choices=[None, "add", "softmax", "layernorm", "matmul", "matmul_tf32"])
+    ap.add_argument("--cooldown", type=int, default=0,
+                    help="seconds to idle between suites (laptops throttle; "
+                         "each suite should start from a similar thermal state)")
     args = ap.parse_args()
 
     busy = gpu_busy_warning()
@@ -351,7 +355,10 @@ def main():
         out.append("> WARNING: GPU was shared with other processes during this run.\n")
     if not HAS_TRITON:
         out.append("> triton not installed; skipping triton columns.\n")
-    for name, fn in suites.items():
+    for i, (name, fn) in enumerate(suites.items()):
+        if i and args.cooldown:
+            print(f"cooling down {args.cooldown}s...", flush=True)
+            time.sleep(args.cooldown)
         print(f"running {name}...", flush=True)
         title, rows = fn()
         table = fmt_table(title, rows, "TFLOP" in title)
