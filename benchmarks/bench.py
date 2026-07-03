@@ -13,7 +13,6 @@ way Triton's own benchmarks are run.
 import argparse
 import os
 import subprocess
-import sys
 
 import torch
 

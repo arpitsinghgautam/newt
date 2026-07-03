@@ -56,7 +56,8 @@ class CompiledKernel:
             try:
                 cubin = _cuda.compile_cuda(source, name, _arch())
             except _cuda.NVRTCError as e:
-                lined = "\n".join(f"{i+1:4d} | {l}" for i, l in enumerate(source.splitlines()))
+                lined = "\n".join(
+                    f"{i+1:4d} | {ln}" for i, ln in enumerate(source.splitlines()))
                 raise _cuda.NVRTCError(f"{e}\n--- generated source ---\n{lined}") from None
             with open(path, "wb") as f:
                 f.write(cubin)

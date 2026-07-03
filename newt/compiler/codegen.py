@@ -912,14 +912,14 @@ class Codegen(ast.NodeVisitor):
             if val.layout == CONSTEXPR or val.layout == UNIFORM:
                 lit = (self.literal(val.pyval, store.dtype) if val.layout == CONSTEXPR
                        else self.convert(val.var, val.dtype, store.dtype))
-                g = self.slot_loop(store.numel)
+                self.slot_loop(store.numel)
                 self.emit(f"{store.var}[_s] = {lit};")
                 self.end_loop()
             else:
                 if val.is_ptr and store.is_ptr and val.base != store.base:
                     self.err(node, "a loop-carried pointer block cannot switch its "
                                    "base tensor; use separate pointer variables")
-                g = self.slot_loop(store.numel)
+                self.slot_loop(store.numel)
                 self.emit(f"{store.var}[_s] = {val.var}[_s];")
                 self.end_loop()
         elif store.layout == FRAG:
@@ -1461,7 +1461,6 @@ class Codegen(ast.NodeVisitor):
         ph = len(self.lines)
         self.emit("/* zeros placeholder */")
         var = self.fresh("z")
-        numel = math.prod(sh)
         # frag meta is filled in if this becomes a dot accumulator
         v = Value(LAZY_ZERO, dt, sh, var, meta={"ph": ph, "frag_meta": None})
         return v
@@ -1472,7 +1471,7 @@ class Codegen(ast.NodeVisitor):
         out = self.fresh("fl")
         S = self.slots(math.prod(sh))
         self.emit(f"{dt.ctype} {out}[{S}];")
-        g = self.slot_loop(math.prod(sh))
+        self.slot_loop(math.prod(sh))
         if value.layout == CONSTEXPR:
             src = self.literal(value.pyval, dt)
         elif value.layout == UNIFORM:
@@ -2435,7 +2434,7 @@ class Codegen(ast.NodeVisitor):
         self.emit("#pragma unroll")
         self.emit(f"for (int _v = 0; _v < {V}; ++_v) {{")
         self.indent += 1
-        self.emit(f"int _s = _i0 + _v; int _jv = _j0 + _v; (void)_s;")
+        self.emit("int _s = _i0 + _v; int _jv = _j0 + _v; (void)_s;")
         lane_conds = []
         if numel < self.T * V:
             lane_conds.append(f"_jv < {numel}")

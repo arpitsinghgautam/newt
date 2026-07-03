@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+
+  compiler-tests:
+    # Hosted runners have no GPU: the suite self-skips GPU tests and runs
+    # the CPU-only compiler-structure tests (Python AST -> CUDA C++).
+    # The full 176-test GPU suite runs locally before every push.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install torch (CPU) and newt
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e . pytest
+      - name: Import both packages
+        run: python -c "import newt, deuteron; print(newt.__version__)"
+      - name: Compiler tests (no GPU required)
+        run: python -m pytest tests -q

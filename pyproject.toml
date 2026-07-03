@@ -9,9 +9,33 @@ description = "A mini-Triton (newt) and a mini-Helion (deuteron): tile DSLs JIT-
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["torch"]
+license = { text = "MIT" }
+authors = [{ name = "Arpit Singh Gautam", email = "arpitsinghgautam777@gmail.com" }]
+keywords = ["gpu", "cuda", "compiler", "triton", "kernels", "jit", "deep-learning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Compilers",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+
+[project.urls]
+Repository = "https://github.com/arpitsinghgautam/newt"
 
 [tool.setuptools.packages.find]
 include = ["newt*", "deuteron*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["cpu: compiler-only tests that run without a GPU"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# E731: grid lambdas are the Triton launch idiom; codegen builds expr lambdas
+ignore = ["E731"]

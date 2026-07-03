@@ -1,6 +1,5 @@
 """Comprehensive op correctness tests: every nl.* op vs a torch reference."""
 
-import math
 
 import pytest
 import torch

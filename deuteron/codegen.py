@@ -343,12 +343,10 @@ class SourceGen(ast.NodeVisitor):
             if mname in ("sum", "max", "min", "amax", "amin", "mean"):
                 return self._reduce_expr(node, base, mname)
             if mname == "to":
-                dt_arg = self.expr(node.args[0]) if node.args else None
                 self.err(node, "use dt.zeros(..., dtype=...) / implicit store casts instead of .to()")
         self.err(node, f"unsupported call {ast.dump(node.func)[:60]}")
 
     def _zeros_expr(self, node, fname):
-        import torch
 
         shape_arg = node.args[0]
         elts = shape_arg.elts if isinstance(shape_arg, (ast.List, ast.Tuple)) else [shape_arg]

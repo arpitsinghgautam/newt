@@ -1,7 +1,5 @@
 """@newt.autotune / @newt.heuristics - same decorators as Triton."""
 
-import builtins
-import inspect
 
 
 class Config:
