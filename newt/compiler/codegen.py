@@ -224,6 +224,7 @@ class Codegen(ast.NodeVisitor):
         self.ring_reservations = []
         self.frag_pending = {}
         self._prologue_decls = []
+        self.stages = 2  # dot pipeline depth (ring slots); set by compile_fn
 
     # -- infrastructure ------------------------------------------------------
 
@@ -530,59 +531,84 @@ class Codegen(ast.NodeVisitor):
         m = ref.meta
         out = self.fresh("fe")
         self.emit(self._frag_decl(out, m))
+        nelem, out_at = self._frag_elem(m, out)
         self.emit("#pragma unroll")
         self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)")
         self.emit("#pragma unroll")
         self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn)")
         self.emit("#pragma unroll")
-        self.emit(f"for (int _fe = 0; _fe < {out}[_fm][_fn].num_elements; ++_fe) {{")
+        self.emit(f"for (int _fe = 0; _fe < {nelem}; ++_fe) {{")
         self.indent += 1
         exprs = []
         for o in operands:
             if o.layout == FRAG:
-                exprs.append(f"{o.var}[_fm][_fn].x[_fe]")
+                exprs.append(self._frag_elem(m, o.var)[1])
             elif o.layout == CONSTEXPR:
                 exprs.append(self.literal(o.pyval, tp.float32))
             else:
                 exprs.append(self.convert(o.var, o.dtype, tp.float32))
-        self.emit(f"{out}[_fm][_fn].x[_fe] = {expr_fn(exprs)};")
+        self.emit(f"{out_at} = {expr_fn(exprs)};")
         self.end_loop()
         return Value(FRAG, tp.float32, ref.shape, out, meta=m)
 
     # -- fragments ------------------------------------------------------------
 
-    def _frag_meta(self, M, N, KF):
+    def _frag_meta(self, M, N, KF, kind="wmma"):
         """Choose the warp tiling (WM x WN) for an M x N accumulator.
 
         If the fragment grid is smaller than num_warps, use fewer warps and
         leave the rest idle (guarded by _warp < W in the collective sections).
         """
         W = self.num_warps
+        # 'mma' kind: raw mma.sync PTX, per-warp tiles are 16 rows x 8 cols;
+        # 'wmma' kind: the WMMA API, tiles are 16 x 16
+        ntile = 8 if kind == "mma" else 16
         while W >= 1:
             best = None
             for WM in [1, 2, 4, 8, 16, 32]:
                 if WM > W or W % WM != 0:
                     continue
                 WN = W // WM
-                if (M // 16) % WM == 0 and (N // 16) % WN == 0:
-                    FM, FN = M // 16 // WM, N // 16 // WN
-                    score = abs(FM - FN)
+                if (M // 16) % WM == 0 and (N // ntile) % WN == 0:
+                    FM, FN = M // 16 // WM, N // ntile // WN
+                    score = abs(FM * 16 - FN * ntile)
                     if best is None or score < best[0]:
                         best = (score, WM, WN, FM, FN)
             if best is not None:
                 _, WM, WN, FM, FN = best
-                return dict(M=M, N=N, WM=WM, WN=WN, FM=FM, FN=FN, KF=KF, W=WM * WN)
+                return dict(M=M, N=N, WM=WM, WN=WN, FM=FM, FN=FN, KF=KF,
+                            W=WM * WN, kind=kind)
             W //= 2
         raise CompileError(
             f"cannot tile {M}x{N} dot output; M and N must be multiples of 16")
 
     def _frag_decl(self, var, m):
+        if m["kind"] == "mma":
+            self.uses.add("mmaptx")
+            return f"float {var}[{m['FM']}][{m['FN']}][4];"
         self.uses.add("mma")
         return (f"wmma::fragment<wmma::accumulator, 16, 16, {m['KF']}, float> "
                 f"{var}[{m['FM']}][{m['FN']}];")
 
+    def _frag_elem(self, m, var):
+        """(count-expr, element-accessor) for a fragment's scalars."""
+        if m["kind"] == "mma":
+            return "4", f"{var}[_fm][_fn][_fe]"
+        return f"{var}[_fm][_fn].num_elements", f"{var}[_fm][_fn].x[_fe]"
+
     def _frag_decl_and_fill(self, var, m):
         pad = "  "
+        if m["kind"] == "mma":
+            return (
+                pad + self._frag_decl(var, m) + "\n"
+                + pad + "#pragma unroll\n"
+                + pad + f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)\n"
+                + pad + "#pragma unroll\n"
+                + pad + f"for (int _fn = 0; _fn < {m['FN']}; ++_fn)\n"
+                + pad + "#pragma unroll\n"
+                + pad + f"for (int _fe = 0; _fe < 4; ++_fe) "
+                + f"{var}[_fm][_fn][_fe] = 0.0f;"
+            )
         return (
             pad + self._frag_decl(var, m) + "\n"
             + pad + "#pragma unroll\n"
@@ -624,10 +650,7 @@ class Codegen(ast.NodeVisitor):
             self.emit(f"if (_wm == _bi / {m['FM']}) {{")
             self.indent += 1
             self.emit(f"int _fm = _bi % {m['FM']};")
-            self.emit("#pragma unroll")
-            self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn)")
-            self.emit(f"  wmma::store_matrix_sync(&{buf}[(_wn * {m['FN']} + _fn) * 16], "
-                      f"{v.var}[_fm][_fn], {ld}, wmma::mem_row_major);")
+            self._emit_frag_smem(m, v.var, buf, ld, "0", store=True)
             self.end_loop()
             self.emit("__syncthreads();")
             self.emit("#pragma unroll")
@@ -647,11 +670,10 @@ class Codegen(ast.NodeVisitor):
         self.indent += 1
         self.emit(f"int _wm = _warp / {m['WN']}, _wn = _warp % {m['WN']};")
         self.emit("#pragma unroll")
-        self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)")
-        self.emit("#pragma unroll")
-        self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn)")
-        self.emit(f"  wmma::store_matrix_sync(&{buf}[(_wm * {m['FM']} + _fm) * 16 * {ld} + "
-                  f"(_wn * {m['FN']} + _fn) * 16], {v.var}[_fm][_fn], {ld}, wmma::mem_row_major);")
+        self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm) {{")
+        self.indent += 1
+        self._emit_frag_smem(m, v.var, buf, ld, f"(_wm * {m['FM']} + _fm) * 16", store=True)
+        self.end_loop()
         self.end_loop()
         self.emit("__syncthreads();")
         g = self.slot_loop(M * N)
@@ -660,6 +682,39 @@ class Codegen(ast.NodeVisitor):
         self.emit(f"if ({g}) {line}" if g else line)
         self.end_loop()
         return Value(CYCLIC, tp.float32, v.shape, out)
+
+    def _emit_frag_smem(self, m, var, buf, ld, row0, store):
+        """Move one 16-row band of fragments (fixed _fm in scope) between
+        fragment registers and an smem buffer. wmma uses the API; the mma
+        kind uses the documented m16n8 accumulator mapping: lane l holds
+        (row groupID, cols 2t, 2t+1) and (row groupID+8, same cols) with
+        groupID = l>>2, t = l&3."""
+        self.emit("#pragma unroll")
+        self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn) {{")
+        self.indent += 1
+        if m["kind"] == "mma":
+            self.emit(f"int _r0 = ({row0}) + (_lane >> 2);")
+            self.emit(f"int _c0 = (_wn * {m['FN']} + _fn) * 8 + (_lane & 3) * 2;")
+            if store:
+                self.emit(f"{buf}[_r0 * {ld} + _c0] = {var}[_fm][_fn][0];")
+                self.emit(f"{buf}[_r0 * {ld} + _c0 + 1] = {var}[_fm][_fn][1];")
+                self.emit(f"{buf}[(_r0 + 8) * {ld} + _c0] = {var}[_fm][_fn][2];")
+                self.emit(f"{buf}[(_r0 + 8) * {ld} + _c0 + 1] = {var}[_fm][_fn][3];")
+            else:
+                self.emit(f"{var}[_fm][_fn][0] = {buf}[_r0 * {ld} + _c0];")
+                self.emit(f"{var}[_fm][_fn][1] = {buf}[_r0 * {ld} + _c0 + 1];")
+                self.emit(f"{var}[_fm][_fn][2] = {buf}[(_r0 + 8) * {ld} + _c0];")
+                self.emit(f"{var}[_fm][_fn][3] = {buf}[(_r0 + 8) * {ld} + _c0 + 1];")
+        else:
+            fnop = "store_matrix_sync" if store else "load_matrix_sync"
+            addr = f"&{buf}[({row0}) * {ld} + (_wn * {m['FN']} + _fn) * 16]"
+            if store:
+                self.emit(f"wmma::{fnop}({addr}, {var}[_fm][_fn], {ld}, "
+                          f"wmma::mem_row_major);")
+            else:
+                self.emit(f"wmma::{fnop}({var}[_fm][_fn], {addr}, {ld}, "
+                          f"wmma::mem_row_major);")
+        self.end_loop()
 
     def cyclic_to_frag(self, v, m):
         """Load a cyclic fp32 [M,N] block into WMMA accumulator fragments.
@@ -695,10 +750,7 @@ class Codegen(ast.NodeVisitor):
             self.emit(f"if (_wm == _bi / {m['FM']}) {{")
             self.indent += 1
             self.emit(f"int _fm = _bi % {m['FM']};")
-            self.emit("#pragma unroll")
-            self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn)")
-            self.emit(f"  wmma::load_matrix_sync({out}[_fm][_fn], "
-                      f"&{buf}[(_wn * {m['FN']} + _fn) * 16], {ld}, wmma::mem_row_major);")
+            self._emit_frag_smem(m, out, buf, ld, "0", store=False)
             self.end_loop()
             self.end_loop()
             self.end_loop()
@@ -716,12 +768,10 @@ class Codegen(ast.NodeVisitor):
         self.indent += 1
         self.emit(f"int _wm = _warp / {m['WN']}, _wn = _warp % {m['WN']};")
         self.emit("#pragma unroll")
-        self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)")
-        self.emit("#pragma unroll")
-        self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn)")
-        self.emit(f"  wmma::load_matrix_sync({out}[_fm][_fn], "
-                  f"&{buf}[(_wm * {m['FM']} + _fm) * 16 * {ld} + (_wn * {m['FN']} + _fn) * 16], "
-                  f"{ld}, wmma::mem_row_major);")
+        self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm) {{")
+        self.indent += 1
+        self._emit_frag_smem(m, out, buf, ld, f"(_wm * {m['FM']} + _fm) * 16", store=False)
+        self.end_loop()
         self.end_loop()
         return Value(FRAG, tp.float32, v.shape, out, meta=m)
 
@@ -859,13 +909,22 @@ class Codegen(ast.NodeVisitor):
             t = self.fresh("fcp")
             m = val.meta
             self.emit(self._frag_decl(t, m))
-            self.emit("#pragma unroll")
-            self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)")
-            self.emit("#pragma unroll")
-            self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn) "
-                      f"{t}[_fm][_fn] = {val.var}[_fm][_fn];")
+            self._emit_frag_copy(m, t, val.var)
             return Value(FRAG, val.dtype, val.shape, t, meta=m)
         return val
+
+    def _emit_frag_copy(self, m, dst, src):
+        self.emit("#pragma unroll")
+        self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)")
+        self.emit("#pragma unroll")
+        if m["kind"] == "mma":
+            self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn)")
+            self.emit("#pragma unroll")
+            self.emit(f"for (int _fe = 0; _fe < 4; ++_fe) "
+                      f"{dst}[_fm][_fn][_fe] = {src}[_fm][_fn][_fe];")
+        else:
+            self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn) "
+                      f"{dst}[_fm][_fn] = {src}[_fm][_fn];")
 
     def _emit_decl(self, name, decl):
         """Emit a declaration, hoisting it above the enclosing loop/branch if
@@ -929,12 +988,7 @@ class Codegen(ast.NodeVisitor):
                 # a deferred mma into the value being overwritten must retire
                 # first, or it would later fire into the NEW contents
                 self._emit_flush(store.var)
-            m = store.meta
-            self.emit("#pragma unroll")
-            self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)")
-            self.emit("#pragma unroll")
-            self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn) "
-                      f"{store.var}[_fm][_fn] = {val.var}[_fm][_fn];")
+            self._emit_frag_copy(store.meta, store.var, val.var)
 
     def visit_For(self, node):
         self.flush_lazy_loads()
@@ -2146,8 +2200,17 @@ class Codegen(ast.NodeVisitor):
         if M < 16 or N < 16 or K < KF or M % 16 or N % 16 or K % KF:
             self.err(node, f"dot requires M,N multiples of 16 and K multiple of {KF} "
                            f"(got {M}x{K} @ {K}x{N})")
-        self.uses.add("mma")
-        m = self._frag_meta(M, N, KF)
+        # 'mma' kind: raw ldmatrix/mma.sync PTX over XOR-swizzled smem
+        # (conflict-free, no padding); 'wmma' kind: the coarser WMMA API
+        # (kept for tf32 and as a fallback via NEWT_MMA=wmma)
+        kind = ("mma" if a.dtype in (tp.float16, tp.bfloat16)
+                and a.dtype.itemsize * self.VEC == 16
+                and os.environ.get("NEWT_MMA", "ptx") != "wmma" else "wmma")
+        if kind == "mma":
+            self.uses.add("mmaptx")
+        else:
+            self.uses.add("mma")
+        m = self._frag_meta(M, N, KF, kind)
         # a persistent (loop-carried) fragment accumulator can be pipelined:
         # each execution stages its tile async and runs the mma for the tile
         # staged by the PREVIOUS execution, hiding a full iteration of memory
@@ -2161,8 +2224,14 @@ class Codegen(ast.NodeVisitor):
             self.emit("#pragma unroll")
             self.emit(f"for (int _fm = 0; _fm < {m['FM']}; ++_fm)")
             self.emit("#pragma unroll")
-            self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn) "
-                      f"wmma::fill_fragment({accv}[_fm][_fn], 0.0f);")
+            if m["kind"] == "mma":
+                self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn)")
+                self.emit("#pragma unroll")
+                self.emit(f"for (int _fe = 0; _fe < 4; ++_fe) "
+                          f"{accv}[_fm][_fn][_fe] = 0.0f;")
+            else:
+                self.emit(f"for (int _fn = 0; _fn < {m['FN']}; ++_fn) "
+                          f"wmma::fill_fragment({accv}[_fm][_fn], 0.0f);")
             acc = Value(FRAG, tp.float32, (M, N), accv, meta=m)
         else:
             if acc.layout == LAZY_ZERO:
@@ -2181,13 +2250,20 @@ class Codegen(ast.NodeVisitor):
         # a deferred mma from another dot site must land before we touch acc
         if acc.var in self.frag_pending:
             self._emit_flush(acc.var)
-        # staging geometry
+        # staging geometry: the mma kind is unpadded (XOR swizzle kills bank
+        # conflicts instead); wmma keeps padded leading dimensions
         elem = a.dtype
         ces = elem.ctype
         esz = elem.itemsize
-        PA = 8 if esz <= 2 else 4
-        PB = 8 if esz <= 2 else 4
-        lda, ldb = K + PA, N + PB
+        if m["kind"] == "mma":
+            lda, ldb = K, N
+            swzA = min(K // 8, 8) - 1
+            swzB = min(N // 8, 8) - 1
+        else:
+            PA = 8 if esz <= 2 else 4
+            PB = 8 if esz <= 2 else 4
+            lda, ldb = K + PA, N + PB
+            swzA = swzB = None
         bytesA = (M * lda * esz + 15) // 16 * 16
         bytesB = (K * ldb * esz + 15) // 16 * 16
         V = self.VEC
@@ -2198,58 +2274,64 @@ class Codegen(ast.NodeVisitor):
             use_async = False
             a = self.materialize(a, CYCLIC)
             b = self.materialize(b, CYCLIC)
-        pipelined = (use_async and acc_streamable
+        S = max(2, self.stages)
+        pipelined = (use_async and acc_streamable and self.stages > 1
                      and os.environ.get("NEWT_PIPELINE_DOT", "1") != "0")
         if pipelined:
             # the ring must fit next to the scratch arena (estimate the
-            # epilogue's banded conversion buffer); otherwise fall back to
-            # the chunked path rather than failing at assemble time
+            # epilogue's banded conversion buffer); otherwise shrink the ring
+            # and finally fall back to the chunked path rather than failing
+            # at assemble time
             est_scratch = max(self.smem_bytes, 16 * (N + 8) * 4)
             est_scratch = (est_scratch + 15) // 16 * 16
-            rings = sum(self.ring_reservations) + 2 * (bytesA + bytesB)
-            if est_scratch + rings > MAX_SMEM:
+            slotsz = bytesA + bytesB
+            while S > 2 and est_scratch + sum(self.ring_reservations) + S * slotsz > MAX_SMEM:
+                S -= 1
+            if est_scratch + sum(self.ring_reservations) + S * slotsz > MAX_SMEM:
                 pipelined = False
 
         if pipelined:
-            # cross-iteration double buffering with deferred consumption:
-            #   sync; cp.async THIS tile -> ring[buf^1]; commit;
-            #   if pending: wait for the PREVIOUS tile; sync; mma(ring[buf]);
-            #   rotate. The last staged tile is consumed by a flush at the
-            #   first downstream read of the accumulator.
+            # cross-iteration pipelining with deferred consumption over an
+            # S-slot ring, ONE barrier per iteration: once S-1 tiles are in
+            # flight, wait for the oldest (S-2 newer commits), barrier, run
+            # its mma, THEN stage this tile into the free slot. The barrier
+            # before the mma also proves every thread finished the previous
+            # iteration, making the free slot safe to overwrite. Remaining
+            # tiles are consumed by a flush at the accumulator's first
+            # downstream read.
             self.uses.add("pipeline")
             a.meta["consumed"] = True
             b.meta["consumed"] = True
             site = len(self.ring_reservations)
-            slotsz = bytesA + bytesB
-            self.ring_reservations.append(2 * slotsz)
-            buf = f"_dpb{site}"
-            pend = f"_dpp{site}"
-            self._prologue_decls.append(f"int {buf} = 0; bool {pend} = false;")
-            self.emit("__syncthreads();")
+            self.ring_reservations.append(S * slotsz)
+            buf = f"_dpb{site}"   # the free slot this execution stages into
+            pend = f"_dpp{site}"  # staged-but-unconsumed tiles
+            self._prologue_decls.append(f"int {buf} = 0; int {pend} = 0;")
             self.emit("{")
             self.indent += 1
-            self.emit(f"{ces}* _Aw = ({ces}*)(_smem + _NRB{site} + ({buf} ^ 1) * {slotsz});")
-            self.emit(f"{ces}* _Bw = ({ces}*)(_smem + _NRB{site} + ({buf} ^ 1) * {slotsz} "
-                      f"+ {bytesA});")
-            self._stage_chunk_async(a, M, K, lda, "_Aw", None, CK, by_rows=False)
-            self._stage_chunk_async(b, K, N, ldb, "_Bw", None, CK, by_rows=True)
-            self.emit("__pipeline_commit();")
-            self.emit(f"if ({pend}) {{")
+            self.emit(f"if ({pend} == {S - 1}) {{")
             self.indent += 1
-            self.emit("__pipeline_wait_prior(1);")
+            self.emit(f"__pipeline_wait_prior({S - 2});")
             self.emit("__syncthreads();")
-            self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
-            self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
+            self.emit(f"int _rs = ({buf} + 1) % {S};")
+            self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz});")
+            self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz} "
                       f"+ {bytesA});")
             self._emit_mma(m, acc.var, "_Ar", "_Br", lda, ldb, ft, KF, 0, K // KF)
             self.indent -= 1
-            self.emit("}")
-            self.emit(f"{buf} ^= 1; {pend} = true;")
+            self.emit(f"}} else {{ {pend}++; if ({pend} == 1) __syncthreads(); }}")
+            self.emit(f"{ces}* _Aw = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
+            self.emit(f"{ces}* _Bw = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
+                      f"+ {bytesA});")
+            self._stage_chunk_async(a, M, K, lda, "_Aw", None, CK, by_rows=False, swz=swzA)
+            self._stage_chunk_async(b, K, N, ldb, "_Bw", None, CK, by_rows=True, swz=swzB)
+            self.emit("__pipeline_commit();")
+            self.emit(f"{buf} = ({buf} + 1) % {S};")
             self.indent -= 1
             self.emit("}")
             self.frag_pending.setdefault(acc.var, []).append(dict(
                 site=site, m=m, lda=lda, ldb=ldb, ft=ft, KF=KF, K=K,
-                ces=ces, slotsz=slotsz, bytesA=bytesA))
+                ces=ces, slotsz=slotsz, bytesA=bytesA, S=S))
             return acc
 
         self.track_smem(bytesA + bytesB)
@@ -2265,27 +2347,36 @@ class Codegen(ast.NodeVisitor):
             CH = K // CK
             a.meta["consumed"] = True
             b.meta["consumed"] = True
-            self._stage_chunk_async(a, M, K, lda, As, 0, CK, by_rows=False)
-            self._stage_chunk_async(b, K, N, ldb, Bs, 0, CK, by_rows=True)
+            self._stage_chunk_async(a, M, K, lda, As, 0, CK, by_rows=False, swz=swzA)
+            self._stage_chunk_async(b, K, N, ldb, Bs, 0, CK, by_rows=True, swz=swzB)
             self.emit("__pipeline_commit();")
             for ck in range(CH):
                 if ck + 1 < CH:
-                    self._stage_chunk_async(a, M, K, lda, As, ck + 1, CK, by_rows=False)
-                    self._stage_chunk_async(b, K, N, ldb, Bs, ck + 1, CK, by_rows=True)
+                    self._stage_chunk_async(a, M, K, lda, As, ck + 1, CK,
+                                            by_rows=False, swz=swzA)
+                    self._stage_chunk_async(b, K, N, ldb, Bs, ck + 1, CK,
+                                            by_rows=True, swz=swzB)
                     self.emit("__pipeline_commit();")
                 self.emit(f"__pipeline_wait_prior({1 if ck + 1 < CH else 0});")
                 self.emit("__syncthreads();")
                 self._emit_mma(m, acc.var, As, Bs, lda, ldb, ft, KF,
                                ck * CK // KF, (ck + 1) * CK // KF)
         else:
+            def dst(buf, ld, cols, swz):
+                if swz is None:
+                    return f"{buf}[(_j / {cols}) * {ld} + (_j % {cols})]"
+                return (f"{buf}[(_j / {cols}) * {ld} + "
+                        f"_nsw(_j / {cols}, (_j % {cols}) >> 3, {swz}) * 8 + "
+                        f"((_j % {cols}) & 7)]")
+
             g = self.slot_loop(M * K)
             self.emit(f"int _j = {self.lin_expr()};")
-            line = f"{As}[(_j / {K}) * {lda} + (_j % {K})] = {a.var}[_s];"
+            line = f"{dst(As, lda, K, swzA)} = {a.var}[_s];"
             self.emit(f"if ({g}) {line}" if g else line)
             self.end_loop()
             g = self.slot_loop(K * N)
             self.emit(f"int _j = {self.lin_expr()};")
-            line = f"{Bs}[(_j / {N}) * {ldb} + (_j % {N})] = {b.var}[_s];"
+            line = f"{dst(Bs, ldb, N, swzB)} = {b.var}[_s];"
             self.emit(f"if ({g}) {line}" if g else line)
             self.end_loop()
             self.emit("__syncthreads();")
@@ -2295,21 +2386,26 @@ class Codegen(ast.NodeVisitor):
     def _emit_flush(self, accvar):
         """Run the deferred mma(s) of pipelined dot sites for this
         accumulator (runtime no-op if none pending). Emitted at every
-        downstream read; at most one site's flag is true at runtime and the
-        flags make repeated flush blocks idempotent."""
+        downstream read; the runtime counters make repeated flush blocks
+        idempotent. Consumes oldest-first after waiting for all copies."""
         for p in self.frag_pending[accvar]:
-            site, ces, slotsz = p["site"], p["ces"], p["slotsz"]
+            site, ces, slotsz, S = p["site"], p["ces"], p["slotsz"], p["S"]
             buf, pend = f"_dpb{site}", f"_dpp{site}"
-            self.emit(f"if ({pend}) {{")
+            self.emit(f"if ({pend} > 0) {{")
             self.indent += 1
             self.emit("__pipeline_wait_prior(0);")
             self.emit("__syncthreads();")
-            self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz});")
-            self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + {buf} * {slotsz} "
+            self.emit(f"for (int _fi = {pend}; _fi > 0; --_fi) {{")
+            self.indent += 1
+            self.emit(f"int _rs = ({buf} - _fi + {2 * S}) % {S};")
+            self.emit(f"{ces}* _Ar = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz});")
+            self.emit(f"{ces}* _Br = ({ces}*)(_smem + _NRB{site} + _rs * {slotsz} "
                       f"+ {p['bytesA']});")
             self._emit_mma(p["m"], accvar, "_Ar", "_Br", p["lda"], p["ldb"],
                            p["ft"], p["KF"], 0, p["K"] // p["KF"])
-            self.emit(f"{pend} = false;")
+            self.indent -= 1
+            self.emit("}")
+            self.emit(f"{pend} = 0;")
             self.indent -= 1
             self.emit("}")
 
@@ -2324,6 +2420,8 @@ class Codegen(ast.NodeVisitor):
         """Warp-level mma over fragment steps [kk0, kk1). Preloads the
         A-column / B-row fragments, then the FM x FN outer-product nest.
         Warps >= W idle (small dots); no syncs inside this block."""
+        if m["kind"] == "mma":
+            return self._emit_mma_ptx(m, accv, As, Bs, lda, ldb, ft, kk0, kk1)
         self.emit(f"if (_warp < {m['W']}) {{")
         self.indent += 1
         self.emit(f"int _wm = _warp / {m['WN']}, _wn = _warp % {m['WN']};")
@@ -2363,14 +2461,59 @@ class Codegen(ast.NodeVisitor):
         self.end_loop()
         self.end_loop()
 
-    def _stage_chunk_async(self, lazy, rows, cols, ld, buf, ck, CK, by_rows):
+    def _emit_mma_ptx(self, m, accv, As, Bs, lda, ldb, ft, kk0, kk1):
+        """mma.sync core: ldmatrix from XOR-swizzled smem into registers,
+        then the FM x FN m16n8k16 outer-product nest. One _kk step covers 16
+        elements of K. Per-warp tiles are 16 rows x 8 cols; lane l of a warp
+        holds accumulator elements at (row l>>2 [+8], cols 2*(l&3) [+1])."""
+        mma_fn = "_mma_f16" if ft == "__half" else "_mma_bf16"
+        swa = min(lda // 8, 8) - 1
+        swb = min(ldb // 8, 8) - 1
+        FM, FN = m["FM"], m["FN"]
+        self.emit(f"if (_warp < {m['W']}) {{")
+        self.indent += 1
+        self.emit(f"int _wm = _warp / {m['WN']}, _wn = _warp % {m['WN']};")
+        self.emit("#pragma unroll")
+        self.emit(f"for (int _kk = {kk0}; _kk < {kk1}; ++_kk) {{")
+        self.indent += 1
+        self.emit(f"unsigned _fa[{FM}][4]; unsigned _fb[{FN}][2];")
+        # A fragments: x4 ldmatrix; lanes 0-15 give rows, lane>>4 picks the
+        # k-halves (8x8 quadrants land in mma operand order)
+        self.emit("#pragma unroll")
+        self.emit(f"for (int _fm = 0; _fm < {FM}; ++_fm) {{")
+        self.indent += 1
+        self.emit(f"int _r = (_wm * {FM} + _fm) * 16 + (_lane & 15);")
+        self.emit("int _c8 = _kk * 2 + (_lane >> 4);")
+        self.emit(f"_ldm4(_nsa(&{As}[_r * {lda} + _nsw(_r, _c8, {swa}) * 8]), "
+                  f"_fa[_fm][0], _fa[_fm][1], _fa[_fm][2], _fa[_fm][3]);")
+        self.end_loop()
+        # B fragments: x2 transposed ldmatrix (row-major smem -> col-major regs)
+        self.emit("#pragma unroll")
+        self.emit(f"for (int _fn = 0; _fn < {FN}; ++_fn) {{")
+        self.indent += 1
+        self.emit("int _kr = _kk * 16 + (_lane & 15);")
+        self.emit(f"int _c8 = _wn * {FN} + _fn;")
+        self.emit(f"_ldm2t(_nsa(&{Bs}[_kr * {ldb} + _nsw(_kr, _c8, {swb}) * 8]), "
+                  f"_fb[_fn][0], _fb[_fn][1]);")
+        self.end_loop()
+        self.emit("#pragma unroll")
+        self.emit(f"for (int _fm = 0; _fm < {FM}; ++_fm)")
+        self.emit("#pragma unroll")
+        self.emit(f"for (int _fn = 0; _fn < {FN}; ++_fn)")
+        self.emit(f"  {mma_fn}({accv}[_fm][_fn], _fa[_fm][0], _fa[_fm][1], "
+                  f"_fa[_fm][2], _fa[_fm][3], _fb[_fn][0], _fb[_fn][1]);")
+        self.end_loop()
+        self.end_loop()
+
+    def _stage_chunk_async(self, lazy, rows, cols, ld, buf, ck, CK, by_rows, swz=None):
         """cp.async one K-chunk of a deferred load into its smem tile.
 
         Chunk ck covers columns [ck*CK, (ck+1)*CK) of A (by_rows=False) or
         rows of B (by_rows=True); ck=None stages the whole tile. Groups with
         contiguous, aligned, fully valid lanes go through
         __pipeline_memcpy_async; the rest copy synchronously with mask/other
-        semantics.
+        semantics. swz: XOR-swizzle mask for the destination's 16-byte
+        chunks (mma.sync tiles), or None for linear/padded layouts.
         """
         ptr, mask, other = lazy.meta["ptr"], lazy.meta["mask"], lazy.meta["other"]
         elem = lazy.dtype
@@ -2419,7 +2562,11 @@ class Codegen(ast.NodeVisitor):
         if mask is not None:
             conds.append("(" + " && ".join(
                 str(mask_at(f"_i0 + {v}")) for v in range(V)) + ")")
-        self.emit(f"{elem.ctype}* _dst = &{buf}[_row * {ld} + _col];")
+        if swz is None:
+            self.emit(f"{elem.ctype}* _dst = &{buf}[_row * {ld} + _col];")
+        else:
+            self.emit(f"{elem.ctype}* _dst = &{buf}[_row * {ld} + "
+                      f"_nsw(_row, _col >> 3, {swz}) * 8 + (_col & 7)];")
         self.emit(f"if ({' && '.join(conds)}) {{")
         self.indent += 1
         if gb <= 16:
@@ -2442,7 +2589,12 @@ class Codegen(ast.NodeVisitor):
         src = f"{ptr.base}[{ptr.var}[_s]]"
         if m_lane is not None:
             src = f"(({m_lane}) ? {src} : {other_at('_s')})"
-        line = f"{buf}[(_jv / {cols}) * {ld} + (_jv % {cols})] = {src};"
+        if swz is None:
+            line = f"{buf}[(_jv / {cols}) * {ld} + (_jv % {cols})] = {src};"
+        else:
+            line = (f"{buf}[(_jv / {cols}) * {ld} + "
+                    f"_nsw(_jv / {cols}, (_jv % {cols}) >> 3, {swz}) * 8 + "
+                    f"((_jv % {cols}) & 7)] = {src};")
         self.emit(f"if ({' && '.join(lane_conds)}) {line}" if lane_conds else line)
         self.end_loop()
         self.end_loop()
@@ -2462,6 +2614,41 @@ class Codegen(ast.NodeVisitor):
             hdr.append("using namespace nvcuda;")
         if "pipeline" in self.uses:
             hdr.append("#include <cuda_pipeline_primitives.h>")
+        if "mmaptx" in self.uses:
+            hdr.append(
+                "// XOR-swizzled 16B chunk index (bank-conflict-free ldmatrix)\n"
+                "__device__ __forceinline__ int _nsw(int r, int c8, int m) "
+                "{ return (c8 & ~m) | ((c8 ^ r) & m); }\n"
+                "__device__ __forceinline__ unsigned _nsa(const void* p) "
+                "{ return (unsigned)__cvta_generic_to_shared(p); }\n"
+                "__device__ __forceinline__ void _ldm4(unsigned a, unsigned& r0, "
+                "unsigned& r1, unsigned& r2, unsigned& r3) {\n"
+                "  asm volatile(\"ldmatrix.sync.aligned.m8n8.x4.shared.b16 "
+                "{%0,%1,%2,%3}, [%4];\"\n"
+                "               : \"=r\"(r0), \"=r\"(r1), \"=r\"(r2), \"=r\"(r3) : \"r\"(a));\n"
+                "}\n"
+                "__device__ __forceinline__ void _ldm2t(unsigned a, unsigned& r0, "
+                "unsigned& r1) {\n"
+                "  asm volatile(\"ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 "
+                "{%0,%1}, [%2];\"\n"
+                "               : \"=r\"(r0), \"=r\"(r1) : \"r\"(a));\n"
+                "}\n"
+                "__device__ __forceinline__ void _mma_f16(float* c, unsigned a0, "
+                "unsigned a1, unsigned a2, unsigned a3, unsigned b0, unsigned b1) {\n"
+                "  asm volatile(\"mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 \"\n"
+                "               \"{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\"\n"
+                "               : \"+f\"(c[0]), \"+f\"(c[1]), \"+f\"(c[2]), \"+f\"(c[3])\n"
+                "               : \"r\"(a0), \"r\"(a1), \"r\"(a2), \"r\"(a3), "
+                "\"r\"(b0), \"r\"(b1));\n"
+                "}\n"
+                "__device__ __forceinline__ void _mma_bf16(float* c, unsigned a0, "
+                "unsigned a1, unsigned a2, unsigned a3, unsigned b0, unsigned b1) {\n"
+                "  asm volatile(\"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 \"\n"
+                "               \"{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\"\n"
+                "               : \"+f\"(c[0]), \"+f\"(c[1]), \"+f\"(c[2]), \"+f\"(c[3])\n"
+                "               : \"r\"(a0), \"r\"(a1), \"r\"(a2), \"r\"(a3), "
+                "\"r\"(b0), \"r\"(b1));\n"
+                "}")
         if "vec" in self.uses:
             hdr.append("template<class T, int N, int A> struct alignas(A) _nv { T d[N]; };")
         if "atomicmaxf" in self.uses:
@@ -2516,9 +2703,11 @@ class Codegen(ast.NodeVisitor):
         return "\n".join(hdr + [""] + body) + "\n", total_smem
 
 
-def compile_fn(fndef, fn_globals, param_values, constexprs, num_warps, kernel_name):
+def compile_fn(fndef, fn_globals, param_values, constexprs, num_warps, kernel_name,
+               num_stages=2):
     """param_values: list of (python-name, Value with C var already set)."""
     cg = Codegen(fndef, fn_globals, param_values, constexprs, num_warps, kernel_name)
+    cg.stages = max(1, num_stages)
     cg._param_order = param_values
     src, smem = cg.compile()
     return src, smem

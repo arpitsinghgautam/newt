@@ -143,7 +143,7 @@ class JITFunction:
             return tp.float32
         raise TypeError(f"unsupported kernel argument type {type(val)} for '{name}'")
 
-    def _compile(self, key, constexprs, runtime_types, num_warps):
+    def _compile(self, key, constexprs, runtime_types, num_warps, num_stages=2):
         params = []
         for name in self.param_names:
             if name in self.constexpr_names:
@@ -154,7 +154,8 @@ class JITFunction:
         khash = hashlib.sha256(repr(key).encode()).hexdigest()[:8]
         kname = f"{self.fn.__name__}_{khash}"
         source, smem = codegen.compile_fn(
-            self.fndef, self.fn.__globals__, params, constexprs, num_warps, kname
+            self.fndef, self.fn.__globals__, params, constexprs, num_warps, kname,
+            num_stages=num_stages,
         )
         if os.environ.get("NEWT_DEBUG"):
             print(f"=== newt: {kname} (smem={smem}b, warps={num_warps}) ===")
@@ -166,19 +167,22 @@ class JITFunction:
         import torch
 
         num_warps = kwargs.pop("num_warps", 4)
-        kwargs.pop("num_stages", None)  # accepted for Triton compat; unused
+        num_stages = kwargs.pop("num_stages", 3)  # dot pipeline depth (ring slots)
         if num_warps not in (1, 2, 4, 8, 16, 32):
             raise ValueError(f"num_warps must be a power of two <= 32, got {num_warps}")
+        if not 1 <= num_stages <= 8:
+            raise ValueError(f"num_stages must be in 1..8, got {num_stages}")
         constexprs, runtime = self._classify(args, kwargs)
         runtime_types = {n: self._type_of(n, v) for n, v in runtime.items()}
         key = (
             tuple(sorted((k, repr(v)) for k, v in constexprs.items())),
             tuple((n, t.name) for n, t in runtime_types.items()),
-            num_warps,
+            num_warps, num_stages,
         )
         compiled = self.cache.get(key)
         if compiled is None:
-            compiled = self._compile(key, constexprs, runtime_types, num_warps)
+            compiled = self._compile(key, constexprs, runtime_types, num_warps,
+                                     num_stages)
             self.cache[key] = compiled
 
         cargs = []

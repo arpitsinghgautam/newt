@@ -157,7 +157,8 @@ class Kernel:
             -(-self._resolve_size(sizes, tv.size_sym) // kw[tv.block])
             for tv in ks.grid_tiles
         )
-        self._jit[grid](*self._launch_args(ks, args), **kw, num_warps=cfg.num_warps)
+        self._jit[grid](*self._launch_args(ks, args), **kw, num_warps=cfg.num_warps,
+                        num_stages=cfg.get("num_stages", 3))
 
     # -- autotuning ---------------------------------------------------------------
 
@@ -196,11 +197,13 @@ class Kernel:
         return cfg
 
     def _space(self, ks):
-        blocks = [16, 32, 64, 128] if any(
-            "nl.dot(" in ln for ln in ks.source.splitlines()
-        ) else [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
+        has_dot = any("nl.dot(" in ln for ln in ks.source.splitlines())
+        blocks = ([16, 32, 64, 128] if has_dot
+                  else [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048])
         space = {name: blocks for name in ks.tunable}
         space["num_warps"] = [2, 4, 8]
+        if has_dot:
+            space["num_stages"] = [2, 3, 4]
         return space
 
     def _neighbors(self, cfg, space):

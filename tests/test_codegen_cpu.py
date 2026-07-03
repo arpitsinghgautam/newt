@@ -19,14 +19,14 @@ from newt.compiler import types as tp
 pytestmark = pytest.mark.cpu
 
 
-def compile_source(fn, arg_types, constexprs, num_warps=4):
+def compile_source(fn, arg_types, constexprs, num_warps=4, num_stages=3):
     """Run the code generator directly (no NVRTC, no driver, no GPU)."""
     src = textwrap.dedent(inspect.getsource(fn))
     fndef = ast.parse(src).body[0]
     params = [(n, codegen.Value(codegen.UNIFORM, t, (), n))
               for n, t in arg_types.items()]
     return codegen.compile_fn(fndef, fn.__globals__, params, constexprs,
-                              num_warps, "k")
+                              num_warps, "k", num_stages=num_stages)
 
 
 F32P = tp.pointer_type(tp.float32)
@@ -106,16 +106,18 @@ MM_CONST = {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}
 
 def test_pipelined_dot_structure():
     src, smem = compile_source(matmul_kernel, MM_TYPES, MM_CONST)
-    assert "wmma::mma_sync" in src
+    assert "_mma_f16(" in src                 # raw mma.sync PTX core
+    assert "_ldm4(" in src and "_ldm2t(" in src   # ldmatrix fragment loads
+    assert "_nsw(" in src                     # XOR-swizzled smem
     assert "__pipeline_memcpy_async" in src   # cp.async staging
     assert "#define _NRB0" in src             # dedicated ring region
     assert "_dpp0" in src and "_dpb0" in src  # pipeline state
-    assert "__pipeline_wait_prior(1)" in src  # deferred consumption
-    # ring: 2 slots of (A + B tile); smem = scratch + ring
+    assert "__pipeline_wait_prior(1)" in src  # S=3: wait with S-2 newer commits
+    # ring: 3 slots of (A + B tile), unpadded (swizzle replaces padding)
     esz = 2
-    bytesA = (64 * (32 + 8) * esz + 15) // 16 * 16
-    bytesB = (32 * (64 + 8) * esz + 15) // 16 * 16
-    ring = 2 * (bytesA + bytesB)
+    bytesA = (64 * 32 * esz + 15) // 16 * 16
+    bytesB = (32 * 64 * esz + 15) // 16 * 16
+    ring = 3 * (bytesA + bytesB)
     assert smem >= ring
     base = int(src.split("#define _NRB0 ")[1].split("\n")[0])
     assert base + ring == smem                # ring sits after the scratch arena
@@ -129,7 +131,10 @@ def test_pipeline_env_fallbacks(monkeypatch):
     monkeypatch.setenv("NEWT_ASYNC_DOT", "0")
     src, _ = compile_source(matmul_kernel, MM_TYPES, MM_CONST)
     assert "__pipeline_memcpy_async" not in src   # fully synchronous staging
-    assert "wmma::mma_sync" in src
+    assert "_mma_f16(" in src
+    monkeypatch.setenv("NEWT_MMA", "wmma")
+    src, _ = compile_source(matmul_kernel, MM_TYPES, MM_CONST)
+    assert "wmma::mma_sync" in src            # WMMA fallback still available
 
 
 def test_constexpr_branch_pruning():

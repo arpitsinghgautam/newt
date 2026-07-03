@@ -246,9 +246,11 @@ def bench_layernorm(Ns, warmup, rep, M=4096):
 
 
 MM_CONFIGS = [
-    (128, 128, 32, 8), (128, 128, 64, 8), (128, 64, 64, 8), (64, 128, 64, 4),
-    (64, 128, 64, 8), (128, 64, 64, 4), (64, 64, 64, 4), (128, 128, 32, 4),
-    (128, 128, 128, 8), (64, 128, 128, 8), (128, 64, 128, 8), (64, 64, 128, 4),
+    (128, 128, 32, 8, 2), (128, 128, 32, 8, 3), (128, 128, 32, 8, 4),
+    (128, 128, 64, 8, 2), (128, 128, 64, 8, 3),
+    (128, 256, 32, 8, 3), (64, 128, 64, 8, 3), (64, 128, 64, 8, 4),
+    (64, 128, 64, 4, 3), (128, 64, 64, 8, 3), (64, 64, 64, 4, 3),
+    (128, 128, 32, 4, 3),
 ]
 
 
@@ -262,20 +264,20 @@ def bench_matmul(sizes, warmup, rep, dtype=torch.float16):
         tf = 2 * M * N * K / 1e12
 
         def newt_fn(cfg):
-            BM, BN, BK, W = cfg
+            BM, BN, BK, W, S = cfg
             grid = (newt.cdiv(M, BM), newt.cdiv(N, BN))
             return lambda: n_matmul[grid](
                 a, b, c, M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1),
                 c.stride(0), c.stride(1), BLOCK_M=BM, BLOCK_N=BN, BLOCK_K=BK,
-                num_warps=W)
+                num_warps=W, num_stages=S)
 
         def tri_fn(cfg):
-            BM, BN, BK, W = cfg
+            BM, BN, BK, W, S = cfg
             grid = (newt.cdiv(M, BM), newt.cdiv(N, BN))
             return lambda: t_matmul[grid](
                 a, b, c, M, N, K, a.stride(0), a.stride(1), b.stride(0), b.stride(1),
                 c.stride(0), c.stride(1), BLOCK_M=BM, BLOCK_N=BN, BLOCK_K=BK,
-                num_warps=W)
+                num_warps=W, num_stages=S)
 
         t_torch = do_bench(lambda: torch.matmul(a, b, out=c), warmup=warmup, rep=rep)
         t_newt = best_time(newt_fn, MM_CONFIGS, warmup, rep)
