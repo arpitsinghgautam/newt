@@ -533,10 +533,9 @@ purpose. tf32 (a 19-bit format used for fp32 matmuls) still uses NVIDIA's
 higher-level WMMA API and sits near 45%: mechanical future work.</p>
 
 <div class="callout warn">
-<strong>Correctness got equal billing:</strong> 176 tests against PyTorch references, a
-notebook verified against float64 NumPy, and three adversarial review
-campaigns (hundreds of targeted GPU micro-programs plus a symbolic simulation
-of the pipeline state machine). Every confirmed finding was fixed with a
+<strong>Correctness got equal billing:</strong> 176 tests against PyTorch references and
+three adversarial review campaigns (hundreds of targeted GPU micro-programs
+plus a symbolic simulation of the pipeline state machine). Every confirmed finding was fixed with a
 regression test, and the git history doubles as the build log: each compiler
 stage is a self-contained commit.
 </div>

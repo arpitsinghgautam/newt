@@ -52,7 +52,7 @@ flowchart LR
 - **A working mini-Helion on top**: write tile-level PyTorch-like code with
   zero kernel details; deuteron generates the newt kernel, verifies
   candidate configs against an eager PyTorch oracle, and autotunes.
-- **Aggressively verified**: 176 pytest tests, a NumPy-checked notebook, and
+- **Aggressively verified**: 176 pytest tests against PyTorch references and
   three adversarial review campaigns (500+ targeted GPU micro-repros plus a
   symbolic simulation of the pipeline state machine).
 
@@ -212,7 +212,6 @@ tests/                     176 tests, both frameworks, one suite
 examples/                  vector add -> softmax -> layernorm -> autotuned
                            matmul -> fused flash attention (+ deuteron/)
 benchmarks/bench.py        newt vs triton-windows vs torch
-test.ipynb                 NumPy-verified matmul walkthrough (executed)
 ```
 
 ## Correctness
@@ -220,7 +219,6 @@ test.ipynb                 NumPy-verified matmul walkthrough (executed)
 - 176 pytest tests: every op vs torch references, control flow, autotuning,
   boundary masks, the pipeline state machine, and regression tests for every
   bug ever found.
-- `test.ipynb` verifies both frameworks against float64 NumPy references.
 - Three adversarial review campaigns ran 500+ targeted GPU micro-repros
   against the compiler (sync hazards, layout algebra, swizzle consistency,
   wait-counting under interleaved pipelines) plus a symbolic simulation of
@@ -253,7 +251,6 @@ via the WMMA path.
 - [OVERVIEW.md](OVERVIEW.md) - the full story for readers who don't know
   what a kernel or Triton is (start here; there is also an
   [HTML version](OVERVIEW.html) with diagrams).
-- [PLAN.md](PLAN.md) - architecture decisions and milestones.
 - The git history doubles as the build log: each compiler stage in the
   journey table above is a self-contained commit.
 
