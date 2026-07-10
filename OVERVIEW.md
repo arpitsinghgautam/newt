@@ -430,12 +430,11 @@ Why the two kinds of result?
 
 Correctness got as much attention as speed: 176 tests compare every
 operation against PyTorch; a notebook verifies both frameworks against
-float64 NumPy; and three adversarial review campaigns (independent
-reviewers attacking the compiler with hundreds of targeted GPU
-micro-programs, plus a symbolic simulation of the pipeline state machine)
-each ended with every confirmed finding fixed and regression-tested. The
-full history, including every bug found and what caused it, is in
-[LOG.md](LOG.md).
+float64 NumPy; and three adversarial review campaigns (attacking the
+compiler with hundreds of targeted GPU micro-programs, plus a symbolic
+simulation of the pipeline state machine) each ended with every confirmed
+finding fixed and regression-tested. The git history doubles as the build
+log: each compiler stage is a self-contained commit.
 
 ---
 

@@ -225,7 +225,7 @@ test.ipynb                 NumPy-verified matmul walkthrough (executed)
   against the compiler (sync hazards, layout algebra, swizzle consistency,
   wait-counting under interleaved pipelines) plus a symbolic simulation of
   the N-stage ring; every confirmed finding was fixed with a regression
-  test. The build log (`LOG.md`) records all of it.
+  test (see `tests/test_review_fixes.py` and `tests/test_pipeline_dot.py`).
 - CI runs lint + GPU-free compiler-structure tests (the generated CUDA is
   validated without a GPU) on every push.
 
@@ -253,9 +253,9 @@ via the WMMA path.
 - [OVERVIEW.md](OVERVIEW.md) - the full story for readers who don't know
   what a kernel or Triton is (start here; there is also an
   [HTML version](OVERVIEW.html) with diagrams).
-- [PLAN.md](PLAN.md) - architecture decisions.
-- [LOG.md](LOG.md) - the chronological build log: every design choice, bug,
-  review finding and benchmark, in order.
+- [PLAN.md](PLAN.md) - architecture decisions and milestones.
+- The git history doubles as the build log: each compiler stage in the
+  journey table above is a self-contained commit.
 
 > *Why "newt"? **Triton** was the original genus name for newts (Laurenti,
 > 1768) - a newt is literally a small triton. A **deuteron** is a lighter

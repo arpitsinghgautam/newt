@@ -537,8 +537,8 @@ higher-level WMMA API and sits near 45%: mechanical future work.</p>
 notebook verified against float64 NumPy, and three adversarial review
 campaigns (hundreds of targeted GPU micro-programs plus a symbolic simulation
 of the pipeline state machine). Every confirmed finding was fixed with a
-regression test; the full build log, including every bug and its root cause,
-is in <code>LOG.md</code>.
+regression test, and the git history doubles as the build log: each compiler
+stage is a self-contained commit.
 </div>
 
 <!-- ============================ GLOSSARY ============================ -->
@@ -566,7 +566,7 @@ is in <code>LOG.md</code>.
   <p>newt 🦎 (Triton was the original genus name for newts) and deuteron ⚛
   (a lighter nucleus than a helion). MIT licensed.<br>
   Repository: <code>README.md</code> for the quick tour, <code>OVERVIEW.md</code> for this story in
-  prose, <code>LOG.md</code> for the full build history.</p>
+  prose, the git history for how it was built, commit by commit.</p>
 </footer>
 
 </div>
