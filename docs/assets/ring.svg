@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 330" font-family="-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arrG" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#484f58"/></marker>
+  </defs>
+  <rect x="0.5" y="0.5" width="879" height="329" rx="14" fill="#0d1117" stroke="#30363d"/>
+  <text x="440" y="32" text-anchor="middle" font-size="14" font-weight="700" fill="#e6edf3">hiding the ~500-cycle DRAM latency: the <tspan font-family="ui-monospace,'Cascadia Code',Consolas,monospace" fill="#2dd4bf">cp.async</tspan> ring</text>
+
+  <text x="104" y="80" text-anchor="end" font-size="12" fill="#6e7681">naive loop</text>
+  <g>
+    <rect x="120" y="62" width="130" height="24" rx="4" fill="#1c2433" stroke="#3f4a5c"/><text x="185" y="78" text-anchor="middle" font-size="10.5" fill="#9db3ce">copy tile 0</text>
+    <rect x="252" y="62" width="56" height="24" rx="4" fill="#2dd4bf"/><text x="280" y="78" text-anchor="middle" font-size="10.5" font-weight="700" fill="#04211d">mma</text>
+    <rect x="310" y="62" width="130" height="24" rx="4" fill="#1c2433" stroke="#3f4a5c"/><text x="375" y="78" text-anchor="middle" font-size="10.5" fill="#9db3ce">copy tile 1</text>
+    <rect x="442" y="62" width="56" height="24" rx="4" fill="#2dd4bf"/><text x="470" y="78" text-anchor="middle" font-size="10.5" font-weight="700" fill="#04211d">mma</text>
+    <rect x="500" y="62" width="130" height="24" rx="4" fill="#1c2433" stroke="#3f4a5c"/><text x="565" y="78" text-anchor="middle" font-size="10.5" fill="#9db3ce">copy tile 2</text>
+    <rect x="632" y="62" width="56" height="24" rx="4" fill="#2dd4bf"/><text x="660" y="78" text-anchor="middle" font-size="10.5" font-weight="700" fill="#04211d">mma</text>
+    <text x="706" y="79" font-size="12" font-weight="700" fill="#f0883e">stalls</text>
+  </g>
+
+  <text x="104" y="170" text-anchor="end" font-size="12" fill="#6e7681">newt's ring</text>
+  <text x="104" y="186" text-anchor="end" font-size="10.5" font-family="ui-monospace,'Cascadia Code',Consolas,monospace" fill="#6e7681">num_stages=3</text>
+  <g>
+    <rect x="120" y="128" width="120" height="22" rx="4" fill="#1c2433" stroke="#3f4a5c"/><text x="180" y="143" text-anchor="middle" font-size="10.5" fill="#9db3ce">copy 0 (async)</text>
+    <rect x="150" y="154" width="120" height="22" rx="4" fill="#1c2433" stroke="#3f4a5c"/><text x="210" y="169" text-anchor="middle" font-size="10.5" fill="#9db3ce">copy 1 (async)</text>
+    <rect x="262" y="128" width="120" height="22" rx="4" fill="#1c2433" stroke="#3f4a5c"/><text x="322" y="143" text-anchor="middle" font-size="10.5" fill="#9db3ce">copy 2 (async)</text>
+    <rect x="330" y="154" width="120" height="22" rx="4" fill="#1c2433" stroke="#3f4a5c"/><text x="390" y="169" text-anchor="middle" font-size="10.5" fill="#9db3ce">copy 3 (async)</text>
+    <rect x="252" y="190" width="64" height="24" rx="4" fill="#2dd4bf"/><text x="284" y="206" text-anchor="middle" font-size="10.5" font-weight="700" fill="#04211d">mma 0</text>
+    <rect x="318" y="190" width="64" height="24" rx="4" fill="#2dd4bf"/><text x="350" y="206" text-anchor="middle" font-size="10.5" font-weight="700" fill="#04211d">mma 1</text>
+    <rect x="384" y="190" width="64" height="24" rx="4" fill="#2dd4bf"/><text x="416" y="206" text-anchor="middle" font-size="10.5" font-weight="700" fill="#04211d">mma 2</text>
+    <rect x="450" y="190" width="64" height="24" rx="4" fill="#2dd4bf"/><text x="482" y="206" text-anchor="middle" font-size="10.5" font-weight="700" fill="#04211d">mma 3</text>
+    <text x="534" y="207" font-size="12" font-weight="700" fill="#2dd4bf">tensor cores never wait</text>
+  </g>
+  <path d="M120 232 H796" stroke="#484f58" stroke-width="1.5" marker-end="url(#arrG)"/>
+  <text x="806" y="236" font-size="10.5" fill="#6e7681">time</text>
+
+  <g font-size="12" text-anchor="middle" fill="#8b949e">
+    <text x="440" y="264">cp.async copies global memory to shared memory in the background, without passing through registers</text>
+    <text x="440" y="286">future tiles' addresses do not exist yet inside a user loop, so newt delays consumption instead of prefetching</text>
+    <text x="440" y="308">each k-step consumes the oldest staged tile with one barrier; leftover tiles flush at the accumulator's next read</text>
+  </g>
+</svg>

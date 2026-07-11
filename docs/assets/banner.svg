@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 240" font-family="-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <rect x="0.5" y="0.5" width="879" height="239" rx="14" fill="#0d1117" stroke="#30363d"/>
+  <!-- decorative core grids -->
+  <g fill="#2dd4bf">
+    <g opacity="0.14">
+      <rect x="762" y="26" width="11" height="11" rx="2"/><rect x="777" y="26" width="11" height="11" rx="2"/><rect x="792" y="26" width="11" height="11" rx="2"/><rect x="807" y="26" width="11" height="11" rx="2"/><rect x="822" y="26" width="11" height="11" rx="2"/><rect x="837" y="26" width="11" height="11" rx="2"/>
+      <rect x="762" y="41" width="11" height="11" rx="2"/><rect x="777" y="41" width="11" height="11" rx="2"/><rect x="792" y="41" width="11" height="11" rx="2"/><rect x="807" y="41" width="11" height="11" rx="2"/><rect x="822" y="41" width="11" height="11" rx="2"/><rect x="837" y="41" width="11" height="11" rx="2"/>
+      <rect x="762" y="56" width="11" height="11" rx="2"/><rect x="777" y="56" width="11" height="11" rx="2"/><rect x="792" y="56" width="11" height="11" rx="2"/><rect x="807" y="56" width="11" height="11" rx="2"/><rect x="822" y="56" width="11" height="11" rx="2"/><rect x="837" y="56" width="11" height="11" rx="2"/>
+    </g>
+    <rect x="792" y="41" width="11" height="11" rx="2" opacity="0.55"/>
+    <rect x="822" y="26" width="11" height="11" rx="2" opacity="0.4"/>
+  </g>
+  <g fill="#c084fc">
+    <g opacity="0.12">
+      <rect x="32" y="188" width="11" height="11" rx="2"/><rect x="47" y="188" width="11" height="11" rx="2"/><rect x="62" y="188" width="11" height="11" rx="2"/><rect x="77" y="188" width="11" height="11" rx="2"/><rect x="92" y="188" width="11" height="11" rx="2"/><rect x="107" y="188" width="11" height="11" rx="2"/>
+      <rect x="32" y="203" width="11" height="11" rx="2"/><rect x="47" y="203" width="11" height="11" rx="2"/><rect x="62" y="203" width="11" height="11" rx="2"/><rect x="77" y="203" width="11" height="11" rx="2"/><rect x="92" y="203" width="11" height="11" rx="2"/><rect x="107" y="203" width="11" height="11" rx="2"/>
+    </g>
+    <rect x="62" y="188" width="11" height="11" rx="2" opacity="0.45"/>
+  </g>
+  <!-- wordmark -->
+  <text x="440" y="86" text-anchor="middle" font-size="46" font-weight="800" letter-spacing="-1">
+    <tspan fill="#2dd4bf">newt</tspan><tspan fill="#8b949e" font-weight="500"> + </tspan><tspan fill="#c084fc">deuteron</tspan>
+  </text>
+  <text x="440" y="120" text-anchor="middle" font-size="15.5" fill="#8b949e">the Triton + Helion GPU kernel stack, rebuilt from scratch in ~4,000 lines of Python</text>
+  <!-- pipeline chips -->
+  <g font-family="ui-monospace,'Cascadia Code',Consolas,monospace" font-size="12">
+    <rect x="199" y="146" width="86" height="26" rx="13" fill="#161b22" stroke="#30363d"/>
+    <text x="242" y="163" text-anchor="middle" fill="#e6edf3">Python AST</text>
+    <rect x="309" y="146" width="82" height="26" rx="13" fill="#161b22" stroke="#30363d"/>
+    <text x="350" y="163" text-anchor="middle" fill="#e6edf3">CUDA C++</text>
+    <rect x="415" y="146" width="60" height="26" rx="13" fill="#161b22" stroke="#30363d"/>
+    <text x="445" y="163" text-anchor="middle" fill="#e6edf3">NVRTC</text>
+    <rect x="499" y="146" width="54" height="26" rx="13" fill="#161b22" stroke="#30363d"/>
+    <text x="526" y="163" text-anchor="middle" fill="#e6edf3">cubin</text>
+    <rect x="577" y="146" width="104" height="26" rx="13" fill="#0c2b28" stroke="#2dd4bf"/>
+    <text x="629" y="163" text-anchor="middle" fill="#2dd4bf">tensor cores</text>
+  </g>
+  <g stroke="#6e7681" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M289 159 h8 m-4 -4 l4 4 l-4 4"/>
+    <path d="M395 159 h8 m-4 -4 l4 4 l-4 4"/>
+    <path d="M479 159 h8 m-4 -4 l4 4 l-4 4"/>
+    <path d="M557 159 h8 m-4 -4 l4 4 l-4 4"/>
+  </g>
+  <text x="440" y="205" text-anchor="middle" font-size="13" fill="#6e7681">~4k lines&#160;&#160;|&#160;&#160;176 tests&#160;&#160;|&#160;&#160;no deps beyond torch&#160;&#160;|&#160;&#160;fp16 matmul 110 TFLOP/s&#160;&#160;|&#160;&#160;MIT</text>
+</svg>

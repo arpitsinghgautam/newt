@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 430" font-family="-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arrM" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6e7681"/></marker>
+  </defs>
+  <rect x="0.5" y="0.5" width="879" height="429" rx="14" fill="#0d1117" stroke="#30363d"/>
+
+  <!-- row A: call, classify, cache decision -->
+  <rect x="36" y="36" width="268" height="60" rx="8" fill="#161b22" stroke="#3d444d"/>
+  <g font-family="ui-monospace,'Cascadia Code',Consolas,monospace" font-size="11" fill="#e6edf3" text-anchor="middle">
+    <text x="170" y="56">kernel[grid](args,</text>
+    <text x="170" y="71">BLOCK=..., num_warps=...,</text>
+    <text x="170" y="86">num_stages=...)</text>
+  </g>
+  <path d="M304 66 h16" stroke="#6e7681" stroke-width="2" marker-end="url(#arrM)"/>
+  <rect x="326" y="36" width="250" height="60" rx="8" fill="#161b22" stroke="#3d444d"/>
+  <text x="451" y="56" text-anchor="middle" font-size="13" font-weight="600" fill="#e6edf3">classify arguments</text>
+  <text x="451" y="72" text-anchor="middle" font-size="10.5" fill="#8b949e">tensors -> typed pointers</text>
+  <text x="451" y="86" text-anchor="middle" font-size="10.5" fill="#8b949e">numbers -> scalars, constexpr -> folded</text>
+  <path d="M576 66 h18" stroke="#6e7681" stroke-width="2" marker-end="url(#arrM)"/>
+  <polygon points="600,66 710,34 820,66 710,98" fill="#161b22" stroke="#d29922"/>
+  <text x="710" y="61" text-anchor="middle" font-size="12" font-weight="600" fill="#e6edf3">specialization</text>
+  <text x="710" y="77" text-anchor="middle" font-size="12" font-weight="600" fill="#e6edf3">cache hit?</text>
+  <text x="700" y="116" text-anchor="end" font-size="10" fill="#6e7681">key = constexprs + dtypes + num_warps + num_stages</text>
+
+  <!-- miss path down to row B -->
+  <path d="M710 98 V140 H140 V162" stroke="#6e7681" stroke-width="1.8" fill="none" marker-end="url(#arrM)"/>
+  <text x="722" y="136" font-size="11" fill="#d29922">miss</text>
+  <!-- hit path down to marshal -->
+  <path d="M820 66 H856 V278 H352 V292" stroke="#6e7681" stroke-width="1.8" fill="none" marker-end="url(#arrM)"/>
+  <text x="836" y="58" font-size="11" fill="#2dd4bf">hit</text>
+
+  <!-- row B: the compile pipeline -->
+  <rect x="36" y="170" width="208" height="84" rx="8" fill="#161b22" stroke="#3d444d"/>
+  <text x="140" y="196" text-anchor="middle" font-size="12.5" font-weight="600" fill="#e6edf3">walk the Python AST</text>
+  <text x="140" y="216" text-anchor="middle" font-size="10.5" fill="#8b949e">every value gets a shape,</text>
+  <text x="140" y="230" text-anchor="middle" font-size="10.5" fill="#8b949e">dtype and layout</text>
+  <path d="M244 212 h16" stroke="#6e7681" stroke-width="2" marker-end="url(#arrM)"/>
+  <rect x="266" y="170" width="272" height="84" rx="8" fill="#0c2b28" stroke="#2dd4bf"/>
+  <text x="402" y="190" text-anchor="middle" font-size="13" font-weight="700" fill="#2dd4bf">emit CUDA C++</text>
+  <text x="402" y="206" text-anchor="middle" font-size="10" fill="#8b949e">group-cyclic registers, 16-byte vector fast paths</text>
+  <text x="402" y="219" text-anchor="middle" font-size="10" fill="#8b949e">warp-shuffle reductions, smem arena</text>
+  <text x="402" y="232" text-anchor="middle" font-size="10" fill="#8b949e">ldmatrix + mma.sync over swizzled smem</text>
+  <text x="402" y="245" text-anchor="middle" font-size="10" fill="#8b949e">N-stage cp.async ring</text>
+  <path d="M538 212 h16" stroke="#6e7681" stroke-width="2" marker-end="url(#arrM)"/>
+  <rect x="560" y="170" width="150" height="84" rx="8" fill="#161b22" stroke="#3d444d"/>
+  <text x="635" y="196" text-anchor="middle" font-size="12.5" font-weight="600" fill="#e6edf3">NVRTC</text>
+  <text x="635" y="216" text-anchor="middle" font-size="10.5" fill="#8b949e">in-process compile</text>
+  <text x="635" y="230" text-anchor="middle" font-size="10.5" fill="#8b949e">cubin, disk-cached</text>
+  <path d="M710 212 h16" stroke="#6e7681" stroke-width="2" marker-end="url(#arrM)"/>
+  <rect x="732" y="170" width="116" height="84" rx="8" fill="#161b22" stroke="#3d444d"/>
+  <text x="790" y="196" text-anchor="middle" font-size="12" font-weight="600" fill="#e6edf3">load on GPU</text>
+  <text x="790" y="216" text-anchor="middle" font-size="9.5" font-family="ui-monospace,'Cascadia Code',Consolas,monospace" fill="#8b949e">cuModuleLoadData</text>
+  <text x="790" y="230" text-anchor="middle" font-size="10" fill="#8b949e">driver API, ctypes</text>
+  <text x="402" y="268" text-anchor="middle" font-size="10" font-family="ui-monospace,'Cascadia Code',Consolas,monospace" fill="#6e7681">NEWT_DEBUG=1 prints this source</text>
+  <path d="M790 254 V286 H380 V292" stroke="#6e7681" stroke-width="1.8" fill="none" marker-end="url(#arrM)"/>
+
+  <!-- row C: launch -->
+  <rect x="266" y="300" width="200" height="54" rx="8" fill="#161b22" stroke="#3d444d"/>
+  <text x="366" y="322" text-anchor="middle" font-size="12.5" font-weight="600" fill="#e6edf3">marshal ctypes arguments</text>
+  <text x="366" y="340" text-anchor="middle" font-size="10.5" fill="#8b949e">grid(meta) -> launch dimensions</text>
+  <path d="M466 327 h24" stroke="#6e7681" stroke-width="2" marker-end="url(#arrM)"/>
+  <rect x="496" y="300" width="250" height="54" rx="8" fill="#115e59" stroke="#2dd4bf"/>
+  <text x="621" y="322" text-anchor="middle" font-size="13.5" font-weight="700" font-family="ui-monospace,'Cascadia Code',Consolas,monospace" fill="#ffffff">cuLaunchKernel</text>
+  <text x="621" y="340" text-anchor="middle" font-size="10.5" fill="#99f6e4">on torch's current stream</text>
+
+  <text x="440" y="388" text-anchor="middle" font-size="12.5" fill="#8b949e">the compiler's whole job: map Triton's block semantics onto CUDA's thread semantics</text>
+  <text x="440" y="408" text-anchor="middle" font-size="11.5" fill="#6e7681">NVRTC does register allocation and instruction scheduling (the person-decades parts); newt's ~2,500-line codegen solves the layout problem</text>
+</svg>
