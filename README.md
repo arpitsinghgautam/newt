@@ -1,4 +1,6 @@
-# newt 🦎 + deuteron ⚛
+<p align="center">
+  <a href="https://arpitsinghgautam.github.io/newt/"><img src="docs/assets/banner.svg" alt="newt + deuteron: the Triton and Helion GPU kernel stack, rebuilt from scratch in ~4,000 lines of Python" width="880"></a>
+</p>
 
 **A from-scratch mini-Triton and mini-Helion**: the modern GPU-kernel DSL
 stack, rebuilt in ~4,000 lines of readable Python, reaching memory-bandwidth
@@ -7,9 +9,12 @@ parity with real Triton and 80%+ of its tensor-core matmul throughput.
 *In the spirit of [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm):
 small enough to read in an afternoon, real enough to benchmark.*
 
-```
-176 tests | MIT | Windows + Linux | no deps beyond torch | one pip install
-```
+<p align="center">
+  <a href="https://arpitsinghgautam.github.io/newt/"><b>Project site</b></a> |
+  <a href="docs/OVERVIEW.md">The full story, from zero</a> |
+  <a href="#benchmarks">Benchmarks</a> |
+  <a href="#quick-start">Quick start</a>
+</p>
 
 ## What this is
 
@@ -21,18 +26,9 @@ PyTorch-like tile code, compiled down to Triton and autotuned. Both are
 large industrial compilers. Their ideas, however, are compact - and this
 repo rebuilds the whole two-layer stack in miniature:
 
-```mermaid
-flowchart LR
-    subgraph mini["this repo (~4k lines)"]
-        D["deuteron<br/>tile DSL + autotuner"] --> N["newt<br/>block DSL + JIT compiler"]
-        N --> CU["CUDA C++ -> NVRTC -> cubin<br/>(ctypes, in-process)"]
-    end
-    subgraph prod["the production stack it mirrors"]
-        H["Helion"] --> T["Triton"]
-        T --> M["MLIR -> LLVM -> PTX"]
-    end
-    mini -.->|same ideas, ~100x smaller| prod
-```
+<p align="center">
+  <img src="docs/assets/stack.svg" alt="deuteron generates newt kernels the way Helion generates Triton kernels; newt compiles CUDA C++ through NVRTC the way Triton compiles through MLIR and LLVM" width="880">
+</p>
 
 **Highlights**
 
@@ -113,18 +109,28 @@ tables in [benchmarks/results.md](benchmarks/results.md); rerun with
 start from a similar thermal state, and within-run columns are the fair
 comparison).
 
-**Memory-bound kernels: parity.**
+**Memory-bound kernels: parity.** Once a kernel is coalesced, vectorized
+and fused, everyone saturates the memory bus; there is nothing left to win.
 
-| kernel (fp32, GB/s) | torch | **newt** | triton |
-|---|---|---|---|
-| fused softmax 4096x8192 | 760 | **765** | 767 |
-| layernorm 4096x8192 | 625 | **767** | 764 |
-| vector add 64M | 782 | **777** | 779 |
+<p align="center">
+  <img src="docs/assets/bench-membound.svg" alt="softmax: torch 760, newt 765, triton 767 GB/s; layernorm: torch 625, newt 767, triton 764 GB/s; vector add: torch 782, newt 777, triton 779 GB/s" width="880">
+</p>
 
-**Tensor-core matmul: the journey.** Each stage of the compiler is a commit
-you can read:
+**Tensor-core matmul: the honest chart.** Compute-bound kernels punish
+every scheduling imperfection, which is exactly what makes them the
+interesting benchmark:
 
-| matmul fp16 (TFLOP/s) | 1024³ | 2048³ | 4096³ | 8192³ |
+<p align="center">
+  <img src="docs/assets/bench-matmul.svg" alt="matmul fp16 sustained TFLOP/s by size: newt 67-83, triton 81-119, torch 68-103" width="880">
+</p>
+
+**The journey.** Each stage of the compiler is a commit you can read:
+
+<p align="center">
+  <img src="docs/assets/journey.svg" alt="fp16 4096-cubed matmul: WMMA baseline 63.3, cp.async ring 79.5, mma.sync + swizzle 81.7 sustained vs triton 119.0; cold start newt 109.7 vs triton about 120" width="880">
+</p>
+
+| matmul fp16 (TFLOP/s) | 1024&sup3; | 2048&sup3; | 4096&sup3; | 8192&sup3; |
 |---|---|---|---|---|
 | newt v0.1 (WMMA, sync staging) | 39.1 | 69.1 | 63.3 | 62.8 |
 | + cross-iteration cp.async ring | 63.7 | 70.6 | 79.5 | 70.1 |
@@ -137,26 +143,25 @@ cold-start single-kernel runs reach **109.7 TFLOP/s** (~92% of Triton's own
 cold numbers), up from 45-70% for the naive implementation. tf32 matmul
 sits at ~45% (it still uses the WMMA path). The remaining fp16 gap is
 Triton's finest-grained scheduling - per-iteration address strength
-reduction and warp specialization - and the table above shows exactly which
-commit bought which step.
+reduction and warp specialization - and the journey chart above shows
+exactly which commit bought which step.
 
 ## How a newt kernel runs
 
-```mermaid
-flowchart TD
-    A["kernel[grid](args, BLOCK=..., num_warps=..., num_stages=...)"] --> B["classify arguments<br/>tensors -> typed pointers<br/>ints/floats -> scalar params<br/>constexpr annotations -> compile-time values"]
-    B --> C{"specialization cache hit?<br/>key = constexprs + dtypes + num_warps + num_stages"}
-    C -- "hit" --> H["marshal ctypes arguments"]
-    C -- "miss" --> D["walk the Python AST<br/>every value gets shape + dtype + layout<br/>(uniform scalar / register block / tensor-core fragments)"]
-    D --> E["emit CUDA C++<br/>group-cyclic register layout, 16B vector fast paths<br/>warp-shuffle reductions, smem broadcast arena<br/>ldmatrix + mma.sync over swizzled smem<br/>N-stage cp.async ring pipeline"]
-    E --> F["NVRTC compiles to a cubin<br/>(in-process, disk-cached)"]
-    F --> G["cuModuleLoadData + cuModuleGetFunction<br/>(CUDA driver API via ctypes)"]
-    G --> H
-    H --> I["cuLaunchKernel on torch's current stream"]
-```
+<p align="center">
+  <img src="docs/assets/pipeline.svg" alt="call -> classify arguments -> specialization cache -> walk the AST -> emit CUDA C++ -> NVRTC -> driver load -> marshal -> cuLaunchKernel" width="880">
+</p>
 
 The compiler's whole job is mapping Triton's *block* semantics onto CUDA's
-*thread* semantics:
+*thread* semantics. The heart of that mapping is one rule for where a
+block's elements physically live:
+
+<p align="center">
+  <img src="docs/assets/layout.svg" alt="group-cyclic layout: consecutive elements are dealt to threads in 16-byte groups, round robin, giving coalescing and 128-bit vector loads by construction" width="880">
+</p>
+
+Everything else follows the same pattern - pick the mapping that makes the
+fast path structural, then verify it cheaply at runtime:
 
 | Triton concept | newt implementation |
 |---|---|
@@ -170,24 +175,18 @@ The compiler's whole job is mapping Triton's *block* semantics onto CUDA's
 | `constexpr` | compile-time folding + dead-branch pruning |
 | JIT cache | in-memory specialization + on-disk cubin cache |
 
+The `num_stages` row is where most of the matmul performance lives, and it
+deserves its own picture:
+
+<p align="center">
+  <img src="docs/assets/ring.svg" alt="naive loops stall on every tile copy; the cp.async ring keeps N-1 copies in flight behind the tensor-core math by delaying consumption one iteration" width="880">
+</p>
+
 ## How a deuteron kernel runs
 
-```mermaid
-flowchart TD
-    A["matmul(x, y, out)"] --> B["trace the kernel AST<br/>dt.tile loops -> grid dims / k-loops<br/>tile indexing -> pointer math + boundary masks<br/>@ -> nl.dot with fused accumulator"]
-    B --> C["generate newt kernel source<br/>(every tile size is a constexpr)"]
-    C --> D{"config cache hit?<br/>key = source hash + shape bucket + dtypes"}
-    D -- "hit" --> K["launch best config through newt"]
-    D -- "miss" --> E["eager oracle<br/>run the SAME function as plain PyTorch<br/>on cloned inputs -> ground truth"]
-    E --> F["sample candidate configs<br/>block sizes x num_warps x num_stages"]
-    F --> G["run each candidate on clones"]
-    G --> H{"output matches the oracle?"}
-    H -- "no" --> R["reject config"] --> F
-    H -- "yes" --> I["time with CUDA events"]
-    I --> J["pattern search around the best"]
-    J --> P["persist winner to disk"]
-    P --> K
-```
+<p align="center">
+  <img src="docs/assets/deuteron.svg" alt="trace the AST -> generate newt source -> eager PyTorch oracle -> correctness-filtered autotune -> launch best and cache to disk" width="880">
+</p>
 
 The oracle step is Helion's key trick, replicated: a config that compiles
 and runs but computes the wrong thing is rejected before it is ever timed.
@@ -212,6 +211,8 @@ tests/                     176 tests, both frameworks, one suite
 examples/                  vector add -> softmax -> layernorm -> autotuned
                            matmul -> fused flash attention (+ deuteron/)
 benchmarks/bench.py        newt vs triton-windows vs torch
+docs/                      the project site (GitHub Pages), OVERVIEW.md,
+                           and the SVG diagrams used here
 ```
 
 ## Correctness
@@ -248,9 +249,11 @@ via the WMMA path.
 
 ## Docs
 
-- [OVERVIEW.md](OVERVIEW.md) - the full story for readers who don't know
-  what a kernel or Triton is (start here; there is also an
-  [HTML version](OVERVIEW.html) with diagrams).
+- **[The project site](https://arpitsinghgautam.github.io/newt/)** - the
+  whole story on one page: a from-zero primer, the architecture with
+  diagrams, benchmarks and a glossary.
+- [docs/OVERVIEW.md](docs/OVERVIEW.md) - the same story in markdown, written
+  for readers who don't yet know what a kernel or Triton is.
 - The git history doubles as the build log: each compiler stage in the
   journey table above is a self-contained commit.
 
