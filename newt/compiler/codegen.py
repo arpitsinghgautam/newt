@@ -606,7 +606,7 @@ class Codegen(ast.NodeVisitor):
                 + pad + "#pragma unroll\n"
                 + pad + f"for (int _fn = 0; _fn < {m['FN']}; ++_fn)\n"
                 + pad + "#pragma unroll\n"
-                + pad + f"for (int _fe = 0; _fe < 4; ++_fe) "
+                + pad + "for (int _fe = 0; _fe < 4; ++_fe) "
                 + f"{var}[_fm][_fn][_fe] = 0.0f;"
             )
         return (
