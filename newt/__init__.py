@@ -1,4 +1,4 @@
-"""newt - a mini-Triton: block-programming DSL JIT-compiled to CUDA.
+"""newt - a nano-Triton: block-programming DSL JIT-compiled to CUDA.
 
     import newt
     import newt.language as nl

@@ -1,4 +1,4 @@
-"""deuteron - a mini-Helion: PyTorch-like tile DSL compiled to newt kernels
+"""deuteron - a nano-Helion: PyTorch-like tile DSL compiled to newt kernels
 with automatic autotuning.
 
     import deuteron as dt

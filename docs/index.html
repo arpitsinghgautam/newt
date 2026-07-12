@@ -4,17 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>newt + deuteron: the GPU kernel stack, rebuilt small</title>
-<meta name="description" content="A from-scratch mini-Triton and mini-Helion: the modern GPU kernel DSL stack rebuilt in ~4,000 lines of readable Python, with real tensor-core performance.">
+<meta name="description" content="A from-scratch nano-Triton and nano-Helion: the modern GPU kernel DSL stack rebuilt in ~4,000 lines of readable Python, with real tensor-core performance.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="newt + deuteron: the GPU kernel stack, rebuilt small">
-<meta property="og:description" content="A from-scratch mini-Triton and mini-Helion: ~4,000 lines of Python reaching memory-bandwidth parity with Triton and ~92% of its cold matmul throughput on real tensor cores.">
+<meta property="og:description" content="A from-scratch nano-Triton and nano-Helion: ~4,000 lines of Python reaching memory-bandwidth parity with Triton and ~92% of its cold matmul throughput on real tensor cores.">
 <meta property="og:url" content="https://arpitsinghgautam.me/newt/">
 <meta property="og:image" content="https://arpitsinghgautam.me/newt/assets/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="newt + deuteron: the GPU kernel stack, rebuilt small">
-<meta name="twitter:description" content="A from-scratch mini-Triton and mini-Helion: ~4,000 lines of Python reaching memory-bandwidth parity with Triton and ~92% of its cold matmul throughput on real tensor cores.">
+<meta name="twitter:description" content="A from-scratch nano-Triton and nano-Helion: ~4,000 lines of Python reaching memory-bandwidth parity with Triton and ~92% of its cold matmul throughput on real tensor cores.">
 <meta name="twitter:image" content="https://arpitsinghgautam.me/newt/assets/og-card.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1117'/%3E%3Ctext x='16' y='23' text-anchor='middle' font-family='monospace' font-size='19' font-weight='bold' fill='%232dd4bf'%3En%3C/text%3E%3C/svg%3E">
 <style>
@@ -128,11 +128,11 @@
 <div class="wrap" id="top">
 
 <header class="hero">
-  <div class="kicker">a from-scratch mini-Triton + mini-Helion</div>
+  <div class="kicker">a from-scratch nano-Triton + nano-Helion</div>
   <h1>The modern GPU kernel stack,<br>rebuilt <span class="nw">small</span>.</h1>
-  <p class="sub"><span style="color:var(--teal);font-weight:600">newt</span> is a mini-Triton:
+  <p class="sub"><span style="color:var(--teal);font-weight:600">newt</span> is a nano-Triton:
   Python block kernels JIT-compiled to real GPU machine code through NVRTC and ctypes.
-  <span style="color:var(--purple);font-weight:600">deuteron</span> is a mini-Helion:
+  <span style="color:var(--purple);font-weight:600">deuteron</span> is a nano-Helion:
   PyTorch-like tile code in, autotuned newt kernels out. ~4,000 readable lines, real performance.</p>
   <div class="pillrow">
     <span class="pill">176 tests</span>
@@ -161,15 +161,14 @@ memory and tensor cores. <a href="https://github.com/pytorch/helion">Helion</a> 
 PyTorch) sits one level higher: PyTorch-like tile code, compiled down to Triton and
 autotuned. Both are wonderful, and both are enormous. You cannot realistically read them.</p>
 
-<p>The best way to own the ideas inside a big system is to rebuild it small, the way
-<a href="https://github.com/GeeeekExplorer/nano-vllm">nano-vllm</a> rebuilt the vLLM
-inference engine in ~1,200 readable lines with comparable throughput. That is the
+<p>The best way to own the ideas inside a big system is to rebuild it small: keep the
+architecture, shrink the surface, and refuse to give up real performance. That is the
 founding idea here.</p>
 
 <div class="callout">
 <strong>Goal:</strong> rebuild the entire two-layer kernel stack, in miniature, with real
-performance. <strong>newt</strong> is the mini-Triton (Triton was the original genus name for
-newts, so a newt is literally a small triton). <strong>deuteron</strong> is the mini-Helion
+performance. <strong>newt</strong> is the nano-Triton (Triton was the original genus name for
+newts, so a newt is literally a small triton). <strong>deuteron</strong> is the nano-Helion
 (a deuteron is a lighter atomic nucleus than a helion). Success means memory-bound kernels
 at parity with real Triton, matmul at a respectable and honestly-accounted fraction on
 tensor cores, and a codebase a person can read in an afternoon.
@@ -334,7 +333,7 @@ combination of data types and compile-time constants, then cached.</p>
 <h2><span class="kicker">part 2</span>Inside newt</h2>
 
 <h3>2.1 The shortest path to machine code</h3>
-<p>A mini cannot carry MLIR and LLVM, and it does not need to: NVIDIA ships a C++ compiler
+<p>A nano cannot carry MLIR and LLVM, and it does not need to: NVIDIA ships a C++ compiler
 <em>as a library</em>, NVRTC (NVIDIA Runtime Compilation). newt parses your Python function
 into an AST (abstract syntax tree, the parsed structure of the code), types every value
 with a shape, dtype and layout, emits a CUDA C++ source string, compiles it in-process
@@ -515,7 +514,7 @@ state and within-run columns are the fair comparison.</p>
 <strong>109.7 TFLOP/s, ~92% of Triton's own cold numbers</strong>. The remaining gap is
 Triton's finest-grained machinery: strength-reducing address computations across loop
 iterations and specializing warps into producer/consumer roles. Both are known,
-documented, and out of scope for a mini on purpose. tf32 (a 19-bit float format used for
+documented, and out of scope for a nano on purpose. tf32 (a 19-bit float format used for
 fp32 matmuls on tensor cores) still uses NVIDIA's higher-level WMMA API and sits near 45%:
 mechanical future work.</p>
 

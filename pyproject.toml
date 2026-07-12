@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "newt-lang"
 version = "0.1.0"
-description = "A mini-Triton (newt) and a mini-Helion (deuteron): tile DSLs JIT-compiled to CUDA via NVRTC"
+description = "A nano-Triton (newt) and a nano-Helion (deuteron): tile DSLs JIT-compiled to CUDA via NVRTC"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["torch"]

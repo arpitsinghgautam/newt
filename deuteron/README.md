@@ -1,9 +1,9 @@
 # deuteron ⚛
 
-A **mini-[Helion](https://github.com/pytorch/helion)**: write PyTorch-like
+A **nano-[Helion](https://github.com/pytorch/helion)**: write PyTorch-like
 tile code, get autotuned GPU kernels. Helion compiles a tile DSL down to
 Triton and autotunes the result; deuteron does exactly that one level down -
-it compiles to [newt](../README.md) (the mini-Triton) and autotunes block sizes
+it compiles to [newt](../README.md) (the nano-Triton) and autotunes block sizes
 and warp counts automatically.
 
 > *Why "deuteron"? A helion is a helium-3 nucleus; a deuteron is the lighter
@@ -67,7 +67,7 @@ accumulator), `+ - * / **` and comparisons, `dt.exp/log/sqrt/rsqrt/sigmoid/
 tanh/erf/abs/maximum/minimum/where/relu`, `.sum/.amax/.amin(axis)`,
 `dt.zeros/dt.full`, scalar params, fp16/bf16/fp32.
 
-Not supported (yet, it's a mini): `if` inside kernels, `torch.empty` inside
+Not supported (yet, it's a nano): `if` inside kernels, `torch.empty` inside
 the kernel (pass outputs as arguments), indexing with slices/ints, `mean()`
 (use `.sum(axis) / x.shape[i]`), multiple grid loops per kernel.
 

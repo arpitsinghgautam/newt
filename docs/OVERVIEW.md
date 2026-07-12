@@ -163,20 +163,18 @@ function become GPU machine code without a separate build step.
 
 Triton and Helion are wonderful and enormous. You cannot realistically
 read them. The best way to *own* the ideas inside a large system is to
-rebuild it small: that is what
-[nano-vllm](https://github.com/GeeeekExplorer/nano-vllm) did for the vLLM
-inference engine (~1,200 readable lines, comparable throughput), and it is
-the founding idea here.
+rebuild it small: keep the architecture, shrink the surface, and keep the
+performance real. That is the founding idea here.
 
 **Goal: rebuild the entire two-layer kernel-DSL stack, in miniature, with
 real performance.** Concretely:
 
-1. A mini-Triton, called **newt** (Triton was the original genus name for
+1. A nano-Triton, called **newt** (Triton was the original genus name for
    newts, so a newt is literally a small triton): the full block
    programming model, compiled to real GPU machine code, with performance
    comparable to actual Triton. Not a simulator, not a toy that only
    handles vector-add.
-2. A mini-Helion, called **deuteron** (a deuteron is a lighter atomic
+2. A nano-Helion, called **deuteron** (a deuteron is a lighter atomic
    nucleus than a helion): PyTorch-like tile code in, autotuned newt
    kernels out, with correctness guaranteed by construction.
 
@@ -192,7 +190,7 @@ account of the remaining gap, and a codebase a person can actually read
 
 ### 3.1 The shortest path to machine code
 
-Triton's pipeline needs MLIR and LLVM. A mini cannot carry those, but it
+Triton's pipeline needs MLIR and LLVM. A nano cannot carry those, but it
 does not need to, because NVIDIA ships a C++ compiler *as a library*:
 NVRTC (NVIDIA Runtime Compilation). So newt's pipeline is:
 
@@ -421,7 +419,7 @@ Why the two kinds of result?
   remaining gap is Triton's finest-grained machinery: strength-reducing
   address computations across loop iterations and specializing warps into
   producer/consumer roles. Both are known, documented, and out of scope
-  for a mini on purpose.
+  for a nano on purpose.
 - **tf32 (a 19-bit float format used for fp32 matmuls on tensor cores)
   still uses the older WMMA path** (NVIDIA's higher-level tensor-core
   API, which hides the register layout and costs extra shared-memory

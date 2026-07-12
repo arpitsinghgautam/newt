@@ -2,12 +2,11 @@
   <a href="https://arpitsinghgautam.github.io/newt/"><img src="docs/assets/banner.svg" alt="newt + deuteron: the Triton and Helion GPU kernel stack, rebuilt from scratch in ~4,000 lines of Python" width="880"></a>
 </p>
 
-**A from-scratch mini-Triton and mini-Helion**: the modern GPU-kernel DSL
+**A from-scratch nano-Triton and nano-Helion**: the modern GPU-kernel DSL
 stack, rebuilt in ~4,000 lines of readable Python, reaching memory-bandwidth
 parity with real Triton and 80%+ of its tensor-core matmul throughput.
 
-*In the spirit of [nano-vllm](https://github.com/GeeeekExplorer/nano-vllm):
-small enough to read in an afternoon, real enough to benchmark.*
+*Small enough to read in an afternoon, real enough to benchmark.*
 
 <p align="center">
   <a href="https://arpitsinghgautam.github.io/newt/"><b>Project site</b></a> |
@@ -45,7 +44,7 @@ repo rebuilds the whole two-layer stack in miniature:
 - **Triton-compatible surface**: replace `tl` with `nl` and most kernels
   just run - same `@jit`/grid protocol, `constexpr` specialization, masked
   loads/stores, `@autotune`/`@heuristics`, atomics, grids up to 3D.
-- **A working mini-Helion on top**: write tile-level PyTorch-like code with
+- **A working nano-Helion on top**: write tile-level PyTorch-like code with
   zero kernel details; deuteron generates the newt kernel, verifies
   candidate configs against an eager PyTorch oracle, and autotunes.
 - **Aggressively verified**: 176 pytest tests against PyTorch references and
@@ -241,7 +240,7 @@ broadcasting, `where` `maximum` `minimum` `fma`, `exp` `log` `exp2` `log2`
 fp32 / fp16 / bf16 / fp64 / int8-64 / uint / bool, grids up to 3D,
 `num_warps` 1-32, `num_stages` 1-8, `@autotune` / `@heuristics`.
 
-**Known limitations (by design, it's a mini):** block dims must be powers of
+**Known limitations (by design, it's a nano):** block dims must be powers of
 two; `tl.rand`/philox, `device_print`, and calling other `@jit` functions
 are omitted; `/` `%` `//` on integer blocks follow C truncation; pointer
 offsets are int32; fp32 `dot` uses tf32 tensor cores (Triton's default too)

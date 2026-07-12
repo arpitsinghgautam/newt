@@ -1,6 +1,6 @@
 """deuteron runtime: trace -> generate newt source -> autotune -> launch.
 
-Autotuning protocol (mini-Helion):
+Autotuning protocol (nano-Helion):
   1. run the kernel function *eagerly* (full-size tiles = plain PyTorch) on
      cloned inputs -> the correctness oracle
   2. generate newt source once; tile sizes are constexprs, so every config
