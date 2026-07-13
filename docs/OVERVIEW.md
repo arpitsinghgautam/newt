@@ -161,8 +161,9 @@ function become GPU machine code without a separate build step.
 
 ## Part 2: The problem statement
 
-Triton and Helion are wonderful and enormous. You cannot realistically
-read them. The best way to *own* the ideas inside a large system is to
+Triton and Helion are superb tools, and huge ones; you will not learn how
+they work by reading them top to bottom. The best way to *own* the ideas
+inside a large system is to
 rebuild it small: keep the architecture, shrink the surface, and keep the
 performance real. That is the founding idea here.
 
@@ -426,12 +427,12 @@ Why the two kinds of result?
   round trips), so it sits near 45%. Porting it to the raw PTX path is
   mechanical future work.
 
-Correctness got as much attention as speed: 176 tests compare every
-operation against PyTorch references, and three adversarial review
-campaigns (attacking the compiler with hundreds of targeted GPU
-micro-programs, plus a symbolic simulation of the pipeline state machine)
-each ended with every confirmed finding fixed and regression-tested. The git history doubles as the build
-log: each compiler stage is a self-contained commit.
+Speed means nothing if the answers are wrong, so the test suite got as
+much work as the compiler: 176 tests compare every operation against
+PyTorch references, and the tricky parts (synchronization, layout algebra,
+the pipeline state machine) were hammered with hundreds of small targeted
+GPU programs. Every bug that turned up is now a regression test. The git
+history reads like a build log: each compiler stage landed as one commit.
 
 ---
 

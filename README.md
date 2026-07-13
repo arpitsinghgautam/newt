@@ -47,9 +47,9 @@ repo rebuilds the whole two-layer stack in miniature:
 - **A working nano-Helion on top**: write tile-level PyTorch-like code with
   zero kernel details; deuteron generates the newt kernel, verifies
   candidate configs against an eager PyTorch oracle, and autotunes.
-- **Aggressively verified**: 176 pytest tests against PyTorch references and
-  three adversarial review campaigns (500+ targeted GPU micro-repros plus a
-  symbolic simulation of the pipeline state machine).
+- **Tested against PyTorch**: 176 pytest tests cover every op, control
+  flow, boundary masks and the pipeline state machine; every bug found
+  during development left a regression test behind.
 
 ## Quick start
 
@@ -115,9 +115,8 @@ and fused, everyone saturates the memory bus; there is nothing left to win.
   <img src="docs/assets/bench-membound.svg" alt="softmax: torch 760, newt 765, triton 767 GB/s; layernorm: torch 625, newt 767, triton 764 GB/s; vector add: torch 782, newt 777, triton 779 GB/s" width="880">
 </p>
 
-**Tensor-core matmul: the honest chart.** Compute-bound kernels punish
-every scheduling imperfection, which is exactly what makes them the
-interesting benchmark:
+**Tensor-core matmul.** Compute-bound kernels punish every scheduling
+mistake, which is what makes them the interesting benchmark:
 
 <p align="center">
   <img src="docs/assets/bench-matmul.svg" alt="matmul fp16 sustained TFLOP/s by size: newt 67-83, triton 81-119, torch 68-103" width="880">
@@ -217,13 +216,12 @@ docs/                      the project site (GitHub Pages), OVERVIEW.md,
 ## Correctness
 
 - 176 pytest tests: every op vs torch references, control flow, autotuning,
-  boundary masks, the pipeline state machine, and regression tests for every
-  bug ever found.
-- Three adversarial review campaigns ran 500+ targeted GPU micro-repros
-  against the compiler (sync hazards, layout algebra, swizzle consistency,
-  wait-counting under interleaved pipelines) plus a symbolic simulation of
-  the N-stage ring; every confirmed finding was fixed with a regression
-  test (see `tests/test_review_fixes.py` and `tests/test_pipeline_dot.py`).
+  boundary masks, and the pipeline state machine.
+- The tricky corners (sync hazards, layout algebra, swizzle consistency,
+  wait-counting under interleaved pipelines) were stress-tested with
+  hundreds of small targeted GPU programs; everything that broke is now a
+  regression test in `tests/test_review_fixes.py` and
+  `tests/test_pipeline_dot.py`.
 - CI runs lint + GPU-free compiler-structure tests (the generated CUDA is
   validated without a GPU) on every push.
 

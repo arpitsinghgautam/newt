@@ -159,7 +159,8 @@ compiler, originally from OpenAI) lets you write GPU kernels as Python functions
 <em>blocks</em> of data; its compiler handles thread mapping, memory coalescing, shared
 memory and tensor cores. <a href="https://github.com/pytorch/helion">Helion</a> (from
 PyTorch) sits one level higher: PyTorch-like tile code, compiled down to Triton and
-autotuned. Both are wonderful, and both are enormous. You cannot realistically read them.</p>
+autotuned. Both are superb tools. Both are also hundreds of thousands of lines, and you
+will not learn how they work by reading them top to bottom.</p>
 
 <p>The best way to own the ideas inside a big system is to rebuild it small: keep the
 architecture, shrink the surface, and refuse to give up real performance. That is the
@@ -518,14 +519,6 @@ documented, and out of scope for a nano on purpose. tf32 (a 19-bit float format 
 fp32 matmuls on tensor cores) still uses NVIDIA's higher-level WMMA API and sits near 45%:
 mechanical future work.</p>
 
-<div class="callout warn">
-<strong>Correctness got equal billing:</strong> 176 tests compare every operation against
-PyTorch references, and three adversarial review campaigns attacked the compiler with
-hundreds of targeted GPU micro-programs plus a symbolic simulation of the pipeline state
-machine. Every confirmed finding was fixed with a regression test. The git history doubles
-as the build log: each compiler stage is a self-contained commit.
-</div>
-
 <h3>What was deliberately left out</h3>
 <p>Random number generation inside kernels, device-side printing, calling one
 <code>@jit</code> function from another, non-NVIDIA backends, fp8 formats, Helion's larger
@@ -570,8 +563,8 @@ python examples/01_vector_add.py</code></pre>
   </a>
   <a class="card" href="https://github.com/arpitsinghgautam/newt/commits/main">
     <h3>The build log</h3>
-    <p>The git history is the story: each compiler stage in the journey chart is one
-    self-contained commit.</p>
+    <p>Each compiler stage in the journey chart landed as one commit, so the history
+    reads like a build log.</p>
   </a>
 </div>
 
