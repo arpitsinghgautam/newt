@@ -247,8 +247,8 @@ via the WMMA path.
 ## Docs
 
 - **[The project site](https://arpitsinghgautam.github.io/newt/)** - the
-  whole story on one page: a from-zero primer, the architecture with
-  diagrams, benchmarks and a glossary.
+  whole story with diagrams: the architecture, a from-zero primer,
+  benchmarks, and a glossary.
 - [docs/OVERVIEW.md](docs/OVERVIEW.md) - the same story in markdown, written
   for readers who don't yet know what a kernel or Triton is.
 - The git history doubles as the build log: each compiler stage in the

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs &amp; glossary | newt + deuteron</title>
+<meta name="description" content="Get started with newt + deuteron: install, examples, the reading map, source layout, and a glossary of every GPU term the docs use.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Docs &amp; glossary | newt + deuteron">
+<meta property="og:description" content="Get started with newt + deuteron: install, examples, the reading map, source layout, and a glossary of every GPU term the docs use.">
+<meta property="og:url" content="https://arpitsinghgautam.me/newt/docs.html">
+<meta property="og:image" content="https://arpitsinghgautam.me/newt/assets/og-card.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://arpitsinghgautam.me/newt/assets/og-card.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1117'/%3E%3Ctext x='16' y='23' text-anchor='middle' font-family='monospace' font-size='19' font-weight='bold' fill='%232dd4bf'%3En%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="top"><div class="wrap">
+  <a class="brand" href="index.html"><span class="nw">newt</span> + <span class="dt">deuteron</span></a>
+  <div class="links">
+    <a href="index.html">newt &amp; deuteron</a>
+    <a href="benchmarks.html">Benchmarks</a>
+    <a href="primer.html">Primer</a>
+    <a href="docs.html" class="active">Docs</a>
+    <a href="docs.html#glossary">Glossary</a>
+  </div>
+  <span class="ghstar">
+    <a class="github-button" href="https://github.com/arpitsinghgautam/newt"
+       data-color-scheme="no-preference: dark; light: dark; dark: dark;"
+       data-icon="octicon-star" data-size="large" data-show-count="true"
+       aria-label="Star arpitsinghgautam/newt on GitHub">Star</a>
+  </span>
+</div></nav>
+
+<div class="wrap">
+
+<header class="page">
+  <div class="kicker">get started</div>
+  <h1>Docs &amp; glossary</h1>
+  <p class="sub">Install it, run it, then pick your reading path: the quick tour, the
+  from-zero story, or the source itself.</p>
+</header>
+
+<section id="start">
+<pre><code>git clone https://github.com/arpitsinghgautam/newt
+<span class="k">cd</span> newt
+pip install -e .              <span class="c"># needs torch + an NVIDIA GPU + CUDA toolkit</span>
+python -m pytest tests -q     <span class="c"># 176 tests (GPU ones self-skip without CUDA)</span>
+python examples/01_vector_add.py</code></pre>
+</section>
+
+<section id="reading">
+<h2><span class="kicker">reading map</span>Where to read next</h2>
+<div class="cards">
+  <a class="card" href="https://github.com/arpitsinghgautam/newt#readme">
+    <h3>README</h3>
+    <p>The quick tour: highlights, quick start, benchmark tables, the concept-mapping table.</p>
+  </a>
+  <a class="card" href="https://github.com/arpitsinghgautam/newt/blob/main/docs/OVERVIEW.md">
+    <h3>OVERVIEW.md</h3>
+    <p>This site's story in one markdown file, written for readers starting from zero.</p>
+  </a>
+  <a class="card" href="https://github.com/arpitsinghgautam/newt/tree/main/examples">
+    <h3>Examples</h3>
+    <p>vector add, fused softmax, layernorm, autotuned matmul, fused flash attention, and
+    the deuteron versions.</p>
+  </a>
+  <a class="card" href="https://github.com/arpitsinghgautam/newt/blob/main/newt/compiler/codegen.py">
+    <h3>The compiler</h3>
+    <p>newt/compiler/codegen.py: AST to CUDA C++ in ~2,500 lines. The heart of the project.</p>
+  </a>
+  <a class="card" href="https://github.com/arpitsinghgautam/newt/blob/main/benchmarks/results.md">
+    <h3>Benchmarks</h3>
+    <p>Full result tables, and bench.py to reproduce them (use --cooldown on laptops).</p>
+  </a>
+  <a class="card" href="https://github.com/arpitsinghgautam/newt/commits/main">
+    <h3>The build log</h3>
+    <p>Each compiler stage in the journey chart landed as one commit, so the history
+    reads like a build log.</p>
+  </a>
+</div>
+</section>
+
+<section id="srcmap">
+<h2><span class="kicker">layout</span>Source map</h2>
+<pre class="srcmap"><code>newt/language.py           the nl.* DSL surface (mirrors triton.language)
+newt/compiler/types.py     dtypes, pointers, promotion, broadcasting
+newt/compiler/codegen.py   AST -> CUDA C++ (the compiler, ~2.5k lines)
+newt/runtime/cuda.py       ctypes NVRTC + CUDA driver bindings
+newt/runtime/jit.py        @newt.jit, specialization cache, launch
+newt/runtime/autotuner.py  @newt.autotune / @newt.heuristics
+deuteron/language.py       dt.* surface + eager (PyTorch) implementations
+deuteron/codegen.py        tile-DSL AST -> newt kernel source
+deuteron/runtime.py        tracing, oracle, autotuner, config cache
+tests/                     176 tests, both frameworks, one suite
+examples/                  vector add -> softmax -> layernorm -> matmul -> attention
+benchmarks/bench.py        newt vs triton-windows vs torch</code></pre>
+</section>
+
+<section id="glossary">
+<h2><span class="kicker">reference</span>Glossary</h2>
+<table>
+  <tr><th>term</th><th>meaning</th></tr>
+  <tr><td>kernel</td><td>a function that runs on the GPU across many parallel workers</td></tr>
+  <tr><td>thread / warp / block / grid</td><td>one worker / 32 lockstep workers / a cooperating group with shared memory / all blocks in one launch</td></tr>
+  <tr><td>SM</td><td>streaming multiprocessor: the GPU's core cluster; runs whole thread blocks</td></tr>
+  <tr><td>DRAM / HBM</td><td>the GPU's large, slow main memory</td></tr>
+  <tr><td>shared memory (smem)</td><td>small fast per-block scratchpad, organized in 32 banks</td></tr>
+  <tr><td>coalescing</td><td>adjacent threads touching adjacent memory, so reads combine into wide transactions</td></tr>
+  <tr><td>bank conflict / swizzle</td><td>threads colliding on one smem bank / the XOR index permutation that prevents it</td></tr>
+  <tr><td>tensor core</td><td>dedicated matrix-multiply hardware inside each SM</td></tr>
+  <tr><td>WMMA / mma.sync / ldmatrix</td><td>NVIDIA's high-level tensor-core API / the raw PTX instruction / the cooperative fragment loader</td></tr>
+  <tr><td>cp.async</td><td>background copy from global to shared memory, bypassing registers</td></tr>
+  <tr><td>PTX / SASS / cubin</td><td>portable GPU assembly / real machine code / the compiled binary container</td></tr>
+  <tr><td>NVRTC</td><td>NVIDIA's C++ compiler, usable as an in-process library</td></tr>
+  <tr><td>AST / JIT / constexpr / DSL</td><td>parsed code structure / compile-on-first-use / compile-time constant / a small embedded language</td></tr>
+  <tr><td>autotuning</td><td>automatically searching configuration knobs, keeping the fastest correct one</td></tr>
+  <tr><td>memory-bound / compute-bound</td><td>limited by bandwidth / by arithmetic throughput (the roofline model)</td></tr>
+</table>
+
+<div class="pagenav">
+  <a class="btn ghost" href="index.html">Back to newt &amp; deuteron</a>
+  <a class="btn ghost" href="primer.html">The primer</a>
+</div>
+</section>
+
+<footer>
+  <p class="footlinks">
+    <a href="index.html">newt &amp; deuteron</a> &#183;
+    <a href="benchmarks.html">Benchmarks</a> &#183;
+    <a href="primer.html">Primer</a> &#183;
+    <a href="docs.html">Docs</a> &#183;
+    <a href="docs.html#glossary">Glossary</a> &#183;
+    <a href="https://github.com/arpitsinghgautam/newt">GitHub</a>
+  </p>
+  <p>Why "newt"? <strong>Triton</strong> was the original genus name for newts (Laurenti, 1768):
+  a newt is literally a small triton. A <strong>deuteron</strong> is a lighter nucleus than a
+  <strong>helion</strong>.<br>
+  MIT licensed. <a href="https://github.com/arpitsinghgautam/newt">github.com/arpitsinghgautam/newt</a></p>
+</footer>
+
+</div>
+<script async defer src="https://buttons.github.io/buttons.js"></script>
+</body>
+</html>

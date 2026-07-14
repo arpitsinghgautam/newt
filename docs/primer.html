@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A GPU primer, from zero | newt + deuteron</title>
+<meta name="description" content="CPUs vs GPUs, kernels, warps, the memory pyramid, fusion, CUDA, Triton and Helion: the background for newt + deuteron, assuming no GPU knowledge at all.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="A GPU primer, from zero | newt + deuteron">
+<meta property="og:description" content="CPUs vs GPUs, kernels, warps, the memory pyramid, fusion, CUDA, Triton and Helion: everything the newt + deuteron docs assume, explained from zero.">
+<meta property="og:url" content="https://arpitsinghgautam.me/newt/primer.html">
+<meta property="og:image" content="https://arpitsinghgautam.me/newt/assets/og-card.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://arpitsinghgautam.me/newt/assets/og-card.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1117'/%3E%3Ctext x='16' y='23' text-anchor='middle' font-family='monospace' font-size='19' font-weight='bold' fill='%232dd4bf'%3En%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="top"><div class="wrap">
+  <a class="brand" href="index.html"><span class="nw">newt</span> + <span class="dt">deuteron</span></a>
+  <div class="links">
+    <a href="index.html">newt &amp; deuteron</a>
+    <a href="benchmarks.html">Benchmarks</a>
+    <a href="primer.html" class="active">Primer</a>
+    <a href="docs.html">Docs</a>
+    <a href="docs.html#glossary">Glossary</a>
+  </div>
+  <span class="ghstar">
+    <a class="github-button" href="https://github.com/arpitsinghgautam/newt"
+       data-color-scheme="no-preference: dark; light: dark; dark: dark;"
+       data-icon="octicon-star" data-size="large" data-show-count="true"
+       aria-label="Star arpitsinghgautam/newt on GitHub">Star</a>
+  </span>
+</div></nav>
+
+<div class="wrap">
+
+<header class="page">
+  <div class="kicker">start here</div>
+  <h1>A primer: from CPUs to Triton</h1>
+  <p class="sub">Everything the rest of this site assumes, starting from zero: no GPU,
+  CUDA or machine-learning-systems background needed. Every acronym is expanded where it
+  first appears. If you already know what Triton is, skip straight to
+  <a href="index.html#newt">how newt works</a>.</p>
+</header>
+
+<section id="gpus">
+<h3>1.1 Why GPUs exist</h3>
+<p>A CPU (central processing unit) has a few smart cores optimized to run one instruction
+stream very fast: branch prediction, out-of-order execution, big caches. A GPU (graphics
+processing unit) makes the opposite bet: thousands of simple cores, grouped into a few
+dozen SMs (streaming multiprocessors, the GPU's version of a core cluster). It wins
+whenever you do the <em>same simple operation on millions of numbers at once</em>, which is
+exactly what neural networks do. The machine this project was built on has roughly 75x
+more raw arithmetic in its GPU than in its CPU.</p>
+
+<figure class="figure">
+<svg viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Segoe UI',Roboto,sans-serif">
+  <text x="190" y="24" text-anchor="middle" font-size="14" font-weight="600" fill="#e6edf3">CPU: a few smart cores</text>
+  <g fill="#1c2433" stroke="#3f4a5c">
+    <rect x="70" y="42" width="110" height="58" rx="8"/><rect x="200" y="42" width="110" height="58" rx="8"/>
+    <rect x="70" y="112" width="110" height="58" rx="8"/><rect x="200" y="112" width="110" height="58" rx="8"/>
+  </g>
+  <g fill="#9aa4af" font-size="12" text-anchor="middle">
+    <text x="125" y="75">big core</text><text x="255" y="75">big core</text>
+    <text x="125" y="145">big core</text><text x="255" y="145">big core</text>
+  </g>
+  <text x="590" y="24" text-anchor="middle" font-size="14" font-weight="600" fill="#e6edf3">GPU: thousands of simple cores</text>
+  <g fill="#0c2b28" stroke="#2dd4bf" opacity="0.85">
+    <g id="corerow">
+      <rect x="430" y="42" width="17" height="17" rx="3"/><rect x="451" y="42" width="17" height="17" rx="3"/><rect x="472" y="42" width="17" height="17" rx="3"/><rect x="493" y="42" width="17" height="17" rx="3"/><rect x="514" y="42" width="17" height="17" rx="3"/><rect x="535" y="42" width="17" height="17" rx="3"/><rect x="556" y="42" width="17" height="17" rx="3"/><rect x="577" y="42" width="17" height="17" rx="3"/><rect x="598" y="42" width="17" height="17" rx="3"/><rect x="619" y="42" width="17" height="17" rx="3"/><rect x="640" y="42" width="17" height="17" rx="3"/><rect x="661" y="42" width="17" height="17" rx="3"/><rect x="682" y="42" width="17" height="17" rx="3"/><rect x="703" y="42" width="17" height="17" rx="3"/><rect x="724" y="42" width="17" height="17" rx="3"/>
+    </g>
+    <use href="#corerow" y="21"/><use href="#corerow" y="42"/><use href="#corerow" y="63"/>
+    <use href="#corerow" y="84"/><use href="#corerow" y="105"/>
+  </g>
+  <text x="590" y="188" text-anchor="middle" font-size="11.5" fill="#6e7681">grouped into SMs; you must keep all of them fed</text>
+</svg>
+<figcaption>The GPU trades per-core smarts for sheer count. The price: feeding them makes
+<em>memory movement</em> the real game.</figcaption>
+</figure>
+</section>
+
+<section id="kernels">
+<h3>1.2 Kernels, threads, warps, blocks</h3>
+<p>A <strong>kernel</strong> is a function launched on the GPU across many parallel workers.
+You write the body once; a <strong>grid</strong> of workers runs it. One worker is a
+<strong>thread</strong>; 32 threads execute in lockstep as a <strong>warp</strong>; up to ~1024
+threads form a <strong>thread block</strong>, which runs on one SM and can share fast memory
+and synchronize. Write <code>c[i] = a[i] + b[i]</code> as a kernel and you write no loop:
+worker <code>i</code> handles element <code>i</code>, thousands at a time.</p>
+</section>
+
+<section id="memory">
+<h3>1.3 The memory pyramid (the actual game)</h3>
+<figure class="figure">
+<svg viewBox="0 0 800 240" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Segoe UI',Roboto,sans-serif">
+  <g text-anchor="middle" font-size="13">
+    <polygon points="400,14 480,60 320,60" fill="#2dd4bf"/>
+    <text x="400" y="49" fill="#04211d" font-size="12" font-weight="600">registers</text>
+    <polygon points="310,66 490,66 540,112 260,112" fill="#178f80"/>
+    <text x="400" y="95" fill="#04211d">shared memory (~100 KB / SM, a few cycles)</text>
+    <polygon points="250,118 550,118 610,164 190,164" fill="#11655b"/>
+    <text x="400" y="147" fill="#c7f5ee">L2 cache (tens of MB, tens of cycles)</text>
+    <polygon points="180,170 620,170 690,222 110,222" fill="#0c3d37"/>
+    <text x="400" y="201" fill="#9ee8dd">DRAM, the GPU's main memory (8-80 GB, ~500 cycles away)</text>
+    <text x="700" y="42" font-size="12" fill="#6e7681" text-anchor="start">fast, tiny</text>
+    <text x="700" y="205" font-size="12" fill="#6e7681" text-anchor="start">huge, slow</text>
+  </g>
+</svg>
+<figcaption>Arithmetic is nearly free; a DRAM round trip costs ~500 cycles. Every design
+decision in this project is about living near the top of this pyramid.</figcaption>
+</figure>
+
+<p>Two consequences drive everything:</p>
+<ul>
+  <li><strong>Coalescing.</strong> When a warp's 32 threads read 32 <em>adjacent</em> numbers,
+  the hardware serves them in one wide transaction. Scattered reads can cost 32. Arranging
+  data so warps touch adjacent memory is the difference between using 100% and 10% of the
+  memory bandwidth.</li>
+  <li><strong>Latency hiding.</strong> The GPU keeps far more threads resident than executing:
+  while one warp waits on memory, another computes. A kernel that cannot keep enough work
+  in flight leaves the arithmetic units idle.</li>
+</ul>
+</section>
+
+<section id="fusion">
+<h3>1.4 Why ML needs custom kernels: fusion</h3>
+<p>A neural network layer might compute <code>softmax(x)</code>: normalize a row so it sums
+to 1. Done with library calls, that is three passes over the data, each reading the whole
+array from DRAM and writing it back. A <em>fused</em> kernel does all three steps in one
+pass: load once, compute on-chip, write once.</p>
+
+<figure class="figure">
+<svg viewBox="0 0 800 230" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Segoe UI',Roboto,sans-serif">
+  <g font-size="12">
+    <text x="200" y="22" text-anchor="middle" font-weight="600" font-size="14" fill="#e6edf3">library calls: 3 passes</text>
+    <g fill="#1c2433" stroke="#3f4a5c">
+      <rect x="60" y="36" width="280" height="26" rx="6"/><rect x="60" y="72" width="280" height="26" rx="6"/><rect x="60" y="108" width="280" height="26" rx="6"/>
+    </g>
+    <g fill="#9db3ce" text-anchor="middle">
+      <text x="200" y="53">read row from DRAM, find max, write</text>
+      <text x="200" y="89">read again, exp(x - max), write</text>
+      <text x="200" y="125">read again, divide by sum, write</text>
+    </g>
+    <text x="200" y="160" text-anchor="middle" fill="#f0883e" font-weight="600">6 trips through slow memory</text>
+    <text x="600" y="22" text-anchor="middle" font-weight="600" font-size="14" fill="#e6edf3">fused kernel: 1 pass</text>
+    <g fill="#0c2b28" stroke="#2dd4bf">
+      <rect x="470" y="36" width="260" height="26" rx="6"/><rect x="470" y="72" width="260" height="26" rx="6"/><rect x="470" y="108" width="260" height="26" rx="6"/>
+    </g>
+    <g fill="#9ee8dd" text-anchor="middle">
+      <text x="600" y="53">read row once into registers</text>
+      <text x="600" y="89">max, exp, sum, divide: all on-chip</text>
+      <text x="600" y="125">write once</text>
+    </g>
+    <text x="600" y="160" text-anchor="middle" fill="#2dd4bf" font-weight="600">2 trips: ~3x faster here</text>
+    <text x="400" y="200" text-anchor="middle" fill="#6e7681">modern ML performance work is largely the art of fusing operations, which means writing kernels</text>
+  </g>
+</svg>
+<figcaption>Same math, one third of the memory traffic. Libraries cannot do this for you;
+kernels can.</figcaption>
+</figure>
+</section>
+
+<section id="stack">
+<h3>1.5 CUDA, Triton, Helion</h3>
+<p><strong>CUDA</strong> (NVIDIA's GPU programming platform) gives full control in a C++
+dialect, and demands full control back: manual thread indexing, shared-memory management,
+synchronization barriers, and tensor cores (dedicated matrix-multiply hardware, ~16x
+faster than ordinary arithmetic for that job) driven through special instructions. A
+production CUDA matmul is hundreds of lines, and one misplaced barrier means silently
+wrong answers.</p>
+
+<p><strong>Triton</strong> raised the level: you program a <em>block of data</em>, not threads.
+Here is a complete Triton-style softmax kernel:</p>
+
+<pre><code><span class="d">@jit</span>
+<span class="k">def</span> softmax_kernel(x_ptr, out_ptr, N, stride, BLOCK_N: constexpr):
+    row = program_id(<span class="n">0</span>)              <span class="c"># which row this instance handles</span>
+    cols = arange(<span class="n">0</span>, BLOCK_N)         <span class="c"># a whole block of column indices</span>
+    mask = cols &lt; N                   <span class="c"># guard the ragged edge</span>
+    x = load(x_ptr + row * stride + cols, mask=mask, other=-inf)
+    x = x - max(x, axis=<span class="n">0</span>)            <span class="c"># the whole row, in registers</span>
+    num = exp(x)
+    out = num / sum(num, axis=<span class="n">0</span>)
+    store(out_ptr + row * stride + cols, out, mask=mask)</code></pre>
+
+<p>No threads, no warps, no barriers. The <em>compiler</em> decides how the block's elements
+spread across threads, how the reduction communicates, where barriers go, and how to hit
+the tensor cores. Internally, Triton is a serious industrial compiler: Python is lowered
+through an IR (intermediate representation) and the MLIR and LLVM compiler frameworks down
+to PTX (NVIDIA's portable GPU assembly), then SASS (the real machine code).</p>
+
+<p><strong>Helion</strong> sits one level higher still: PyTorch-like tile code goes in, and
+the compiler generates the Triton kernel <em>and autotunes it</em>, searching block sizes and
+other knobs automatically, verifying each candidate, and caching the fastest. Everything
+in this world compiles JIT (just-in-time): a kernel is compiled on first call for each
+combination of data types and compile-time constants, then cached.</p>
+
+<div class="pagenav">
+  <a class="btn primary" href="index.html#newt">Next: inside newt</a>
+  <a class="btn ghost" href="docs.html#glossary">Glossary</a>
+</div>
+</section>
+
+<footer>
+  <p class="footlinks">
+    <a href="index.html">newt &amp; deuteron</a> &#183;
+    <a href="benchmarks.html">Benchmarks</a> &#183;
+    <a href="primer.html">Primer</a> &#183;
+    <a href="docs.html">Docs</a> &#183;
+    <a href="docs.html#glossary">Glossary</a> &#183;
+    <a href="https://github.com/arpitsinghgautam/newt">GitHub</a>
+  </p>
+  <p>MIT licensed. <a href="https://github.com/arpitsinghgautam/newt">github.com/arpitsinghgautam/newt</a></p>
+</footer>
+
+</div>
+<script async defer src="https://buttons.github.io/buttons.js"></script>
+</body>
+</html>
