@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://arpitsinghgautam.github.io/newt/"><img src="docs/assets/banner.svg" alt="newt + deuteron: the Triton and Helion GPU kernel stack, rebuilt from scratch in ~4,000 lines of Python" width="880"></a>
+  <a href="https://arpitsinghgautam.github.io/nano-triton/"><img src="docs/assets/banner.svg" alt="newt + deuteron: the Triton and Helion GPU kernel stack, rebuilt from scratch in ~4,000 lines of Python" width="880"></a>
 </p>
 
 **A from-scratch nano-Triton and nano-Helion**: the modern GPU-kernel DSL
@@ -9,7 +9,7 @@ parity with real Triton and 80%+ of its tensor-core matmul throughput.
 *Small enough to read in an afternoon, real enough to benchmark.*
 
 <p align="center">
-  <a href="https://arpitsinghgautam.github.io/newt/"><b>Project site</b></a> |
+  <a href="https://arpitsinghgautam.github.io/nano-triton/"><b>Project site</b></a> |
   <a href="docs/OVERVIEW.md">The full story, from zero</a> |
   <a href="#benchmarks">Benchmarks</a> |
   <a href="#quick-start">Quick start</a>
@@ -246,7 +246,7 @@ via the WMMA path.
 
 ## Docs
 
-- **[The project site](https://arpitsinghgautam.github.io/newt/)** - the
+- **[The project site](https://arpitsinghgautam.github.io/nano-triton/)** - the
   whole story with diagrams: the architecture, a from-zero primer,
   benchmarks, and a glossary.
 - [docs/OVERVIEW.md](docs/OVERVIEW.md) - the same story in markdown, written

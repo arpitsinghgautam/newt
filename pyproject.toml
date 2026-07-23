@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "newt-lang"
+name = "nano-triton"
 version = "0.1.0"
 description = "A nano-Triton (newt) and a nano-Helion (deuteron): tile DSLs JIT-compiled to CUDA via NVRTC"
 readme = "README.md"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/arpitsinghgautam/newt"
+Repository = "https://github.com/arpitsinghgautam/nano-triton"
 
 [tool.setuptools.packages.find]
 include = ["newt*", "deuteron*"]

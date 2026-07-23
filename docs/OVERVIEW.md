@@ -3,7 +3,7 @@
 This document explains the entire project to someone with basic computer
 science knowledge and **no background in GPUs, CUDA, Triton, or machine
 learning systems**. Every acronym is expanded the first time it appears.
-If you prefer pictures, the [project site](https://arpitsinghgautam.github.io/newt/)
+If you prefer pictures, the [project site](https://arpitsinghgautam.github.io/nano-triton/)
 tells the same story with diagrams. If you already know what Triton is,
 skip to [Part 2](#part-2-the-problem-statement).
 

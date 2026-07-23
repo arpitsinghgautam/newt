@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <rect width="1200" height="630" fill="#0d1117"/>
+  <g fill="#2dd4bf">
+    <g opacity="0.13">
+      <rect x="1020" y="54" width="18" height="18" rx="4"/><rect x="1044" y="54" width="18" height="18" rx="4"/><rect x="1068" y="54" width="18" height="18" rx="4"/><rect x="1092" y="54" width="18" height="18" rx="4"/><rect x="1116" y="54" width="18" height="18" rx="4"/>
+      <rect x="1020" y="78" width="18" height="18" rx="4"/><rect x="1044" y="78" width="18" height="18" rx="4"/><rect x="1068" y="78" width="18" height="18" rx="4"/><rect x="1092" y="78" width="18" height="18" rx="4"/><rect x="1116" y="78" width="18" height="18" rx="4"/>
+      <rect x="1020" y="102" width="18" height="18" rx="4"/><rect x="1044" y="102" width="18" height="18" rx="4"/><rect x="1068" y="102" width="18" height="18" rx="4"/><rect x="1092" y="102" width="18" height="18" rx="4"/><rect x="1116" y="102" width="18" height="18" rx="4"/>
+    </g>
+    <rect x="1068" y="78" width="18" height="18" rx="4" opacity="0.55"/>
+    <rect x="1116" y="54" width="18" height="18" rx="4" opacity="0.35"/>
+  </g>
+  <g fill="#c084fc">
+    <g opacity="0.11">
+      <rect x="66" y="536" width="18" height="18" rx="4"/><rect x="90" y="536" width="18" height="18" rx="4"/><rect x="114" y="536" width="18" height="18" rx="4"/><rect x="138" y="536" width="18" height="18" rx="4"/><rect x="162" y="536" width="18" height="18" rx="4"/>
+      <rect x="66" y="560" width="18" height="18" rx="4"/><rect x="90" y="560" width="18" height="18" rx="4"/><rect x="114" y="560" width="18" height="18" rx="4"/><rect x="138" y="560" width="18" height="18" rx="4"/><rect x="162" y="560" width="18" height="18" rx="4"/>
+    </g>
+    <rect x="114" y="536" width="18" height="18" rx="4" opacity="0.45"/>
+  </g>
+
+  <text x="600" y="210" text-anchor="middle" font-size="88" font-weight="800" letter-spacing="-2">
+    <tspan fill="#2dd4bf">newt</tspan><tspan fill="#8b949e" font-weight="500"> + </tspan><tspan fill="#c084fc">deuteron</tspan>
+  </text>
+  <text x="600" y="272" text-anchor="middle" font-size="30" fill="#c4cdd6">the Triton + Helion GPU kernel stack, rebuilt from scratch</text>
+  <text x="600" y="314" text-anchor="middle" font-size="30" fill="#c4cdd6">in ~4,000 lines of Python</text>
+
+  <g font-family="ui-monospace,'Cascadia Code',Consolas,monospace" font-size="21">
+    <rect x="235" y="366" width="150" height="46" rx="23" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <text x="310" y="396" text-anchor="middle" fill="#e6edf3">Python AST</text>
+    <rect x="425" y="366" width="142" height="46" rx="23" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <text x="496" y="396" text-anchor="middle" fill="#e6edf3">CUDA C++</text>
+    <rect x="607" y="366" width="108" height="46" rx="23" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+    <text x="661" y="396" text-anchor="middle" fill="#e6edf3">NVRTC</text>
+    <rect x="755" y="366" width="210" height="46" rx="23" fill="#0c2b28" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="860" y="396" text-anchor="middle" fill="#2dd4bf">tensor cores</text>
+  </g>
+  <g stroke="#6e7681" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M392 389 h14 m-7 -7 l7 7 l-7 7"/>
+    <path d="M574 389 h14 m-7 -7 l7 7 l-7 7"/>
+    <path d="M722 389 h14 m-7 -7 l7 7 l-7 7"/>
+  </g>
+
+  <text x="600" y="486" text-anchor="middle" font-size="25" fill="#8b949e">fp16 matmul 110 TFLOP/s&#160;&#160;|&#160;&#160;memory-bound parity with Triton&#160;&#160;|&#160;&#160;176 tests&#160;&#160;|&#160;&#160;MIT</text>
+  <text x="600" y="560" text-anchor="middle" font-size="24" font-family="ui-monospace,'Cascadia Code',Consolas,monospace" fill="#2dd4bf">arpitsinghgautam.me/nano-triton</text>
+</svg>
