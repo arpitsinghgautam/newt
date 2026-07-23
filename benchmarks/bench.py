@@ -98,7 +98,7 @@ def n_matmul(a_ptr, b_ptr, c_ptr, M, N, K, sam, sak, sbk, sbn, scm, scn,
     a_ptrs = a_ptr + offs_m[:, None] * sam + offs_k[None, :] * sak
     b_ptrs = b_ptr + offs_k[:, None] * sbk + offs_n[None, :] * sbn
     acc = nl.zeros((BLOCK_M, BLOCK_N), dtype=nl.float32)
-    for k in range(0, K // BLOCK_K):
+    for k in range(K // BLOCK_K):
         a = nl.load(a_ptrs)
         b = nl.load(b_ptrs)
         acc = nl.dot(a, b, acc)
@@ -153,7 +153,7 @@ if HAS_TRITON:
         a_ptrs = a_ptr + offs_m[:, None] * sam + offs_k[None, :] * sak
         b_ptrs = b_ptr + offs_k[:, None] * sbk + offs_n[None, :] * sbn
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-        for k in range(0, K // BLOCK_K):
+        for k in range(K // BLOCK_K):
             a = tl.load(a_ptrs)
             b = tl.load(b_ptrs)
             acc = tl.dot(a, b, acc)

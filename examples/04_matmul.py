@@ -32,7 +32,7 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K,
     a_ptrs = a_ptr + offs_m[:, None] * sam + offs_k[None, :] * sak
     b_ptrs = b_ptr + offs_k[:, None] * sbk + offs_n[None, :] * sbn
     acc = nl.zeros((BLOCK_M, BLOCK_N), dtype=nl.float32)
-    for k in range(0, nl.cdiv(K, BLOCK_K)):
+    for k in range(nl.cdiv(K, BLOCK_K)):
         a_mask = (offs_m[:, None] < M) & (offs_k[None, :] < K - k * BLOCK_K)
         b_mask = (offs_k[:, None] < K - k * BLOCK_K) & (offs_n[None, :] < N)
         a = nl.load(a_ptrs, mask=a_mask, other=0.0)

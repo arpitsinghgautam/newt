@@ -15,8 +15,7 @@
     add_kernel[(newt.cdiv(n, 1024),)](x, y, out, n, BLOCK=1024)
 """
 
-from . import language
-from . import testing
+from . import language, testing
 from .compiler.codegen import CompileError
 from .runtime.autotuner import Autotuner, Config, Heuristics, autotune, heuristics
 from .runtime.jit import JITFunction, jit
@@ -36,7 +35,17 @@ def next_power_of_2(n):
 
 
 __all__ = [
-    "jit", "autotune", "heuristics", "Config", "JITFunction", "Autotuner",
-    "Heuristics", "CompileError", "language", "testing", "cdiv",
-    "next_power_of_2", "__version__",
+    "Autotuner",
+    "CompileError",
+    "Config",
+    "Heuristics",
+    "JITFunction",
+    "__version__",
+    "autotune",
+    "cdiv",
+    "heuristics",
+    "jit",
+    "language",
+    "next_power_of_2",
+    "testing",
 ]

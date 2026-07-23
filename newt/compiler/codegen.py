@@ -1056,7 +1056,6 @@ class Codegen(ast.NodeVisitor):
                 # dead loop; drop emitted lines
                 del self.lines[while_idx:]
                 return
-            pass
         else:
             if cond.layout != UNIFORM:
                 self.err(node, "while condition must be a scalar")

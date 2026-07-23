@@ -16,6 +16,7 @@ with automatic autotuning.
     print(matmul.to_newt_source(x, y, out))  # inspect generated newt code
 """
 
+from .codegen import TraceError  # noqa: F401
 from .language import (  # noqa: F401
     EagerTensor,
     Tile,
@@ -40,7 +41,6 @@ from .language import (  # noqa: F401
     where,
     zeros,
 )
-from .codegen import TraceError  # noqa: F401
 from .runtime import Config, Kernel, kernel  # noqa: F401
 
 __version__ = "0.1.0"
